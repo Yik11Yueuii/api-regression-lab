@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本（MVP-03）支持发送单个 GET 请求，可附带自定义请求头与查询参数，并对 HTTP 状态码和响应体字符串包含关系进行断言。
+一个轻量级 Java API 回归测试工具。当前版本（MVP-04，验收版）支持发送单个 GET 请求，可附带自定义请求头与查询参数，并对 HTTP 状态码和响应体字符串包含关系进行断言。
 
 ## 环境要求
 
@@ -21,7 +21,25 @@ mvn clean test
 mvn package
 ```
 
-构建成功后生成可执行 JAR：`target/api-regression-lab-0.1.0.jar`。
+构建成功后生成可执行 JAR：`target/api-regression-lab-0.1.0.jar`。如果 Maven 默认不是 Java 21，可在当前终端临时切换（不要改系统全局变量）。
+
+PowerShell：
+
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-21'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+mvn -v
+```
+
+bash：
+
+```bash
+export JAVA_HOME=/path/to/jdk-21
+export PATH="$JAVA_HOME/bin:$PATH"
+mvn -v
+```
+
+`mvn -v` 输出的 `Java version` 必须为 21，否则 `mvn clean test` 会因 `maven.compiler.release=21` 失败。
 
 ## CLI 使用
 
@@ -35,10 +53,16 @@ java -jar target/api-regression-lab-0.1.0.jar --url <URL> --expect-status <状�
 java -jar target/api-regression-lab-0.1.0.jar --url http://localhost:8080/api/weather --expect-status 200 --expect-contains "多云"
 ```
 
-带自定义请求头与查询参数：
+带自定义请求头与查询参数（Windows PowerShell 使用双引号，值中的空格与中文无需自行转义）：
+
+```powershell
+java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather?unit=c" --expect-status 200 --header "Accept: application/json" --header "X-Request-Id: demo-1" --query "city=北京" --query "q=hello world" --expect-contains "ok"
+```
+
+bash 中使用单引号可以避免 `&`、`$`、空格被 shell 解释：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --url http://localhost:8080/api/weather --expect-status 200 --header "Accept: application/json" --header "X-Request-Id: demo-1" --query "city=北京" --query "unit=c"
+java -jar target/api-regression-lab-0.1.0.jar --url 'http://localhost:8080/api/weather?unit=c' --expect-status 200 --header 'Accept: application/json' --query 'city=北京' --query 'q=hello world' --expect-contains 'ok'
 ```
 
 参数：
@@ -74,13 +98,33 @@ java -jar target/api-regression-lab-0.1.0.jar --url http://localhost:8080/api/we
 
 程序不会默认打印完整响应体，避免无意泄露响应数据。响应体按 UTF-8 解码。
 
+退出码可用于脚本或 CI 判断，例如 PowerShell：
+
+```powershell
+java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
+if ($LASTEXITCODE -ne 0) { throw "API regression failed with exit code $LASTEXITCODE" }
+```
+
+各结果的真实命令示例：
+
+```powershell
+# 退出码 0：状态码与响应体断言均通过
+java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
+
+# 退出码 1：状态码不匹配（例如目标返回 404）
+java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/missing" --expect-status 200
+
+# 退出码 2：参数错误（非法请求头）
+java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --header "NoColonHere"
+```
+
 ## 运行测试
 
 ```bash
-mvn test
+mvn clean test
 ```
 
-测试使用 JDK 自带 `com.sun.net.httpserver.HttpServer` 在本机随机空闲端口启动模拟服务，结束后停止服务，不依赖公网或公司内部服务。
+测试使用 JDK 自带 `com.sun.net.httpserver.HttpServer` 在本机随机空闲端口启动模拟服务，结束后停止服务，不依赖公网或公司内部服务。除直接调用入口方法的单元测试外，还包含以子进程方式启动 CLI 的集成测试，用于校验真实的进程退出码 0 / 1 / 2。
 
 ## 已实现功能
 
@@ -95,6 +139,7 @@ mvn test
 - HTTP 状态码与响应体包含断言，输出 PASS / FAIL / ERROR
 - 退出码 0（PASS）、1（FAIL）、2（ERROR）
 - 基于本机 HttpServer 的 JUnit 5 自动化测试
+- 以子进程启动 CLI 的集成测试，覆盖真实进程退出码 0 / 1 / 2
 
 ## 尚未实现功能
 
