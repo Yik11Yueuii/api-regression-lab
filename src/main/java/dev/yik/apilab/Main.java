@@ -6,6 +6,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 public final class Main {
@@ -31,14 +32,24 @@ public final class Main {
                     .timeout(Duration.ofSeconds(30))
                     .GET()
                     .build();
-            HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<String> response = client.send(request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             int actualStatus = response.statusCode();
+            String body = response.body();
 
-            if (actualStatus == options.expectedStatus()) {
+            boolean statusMatches = actualStatus == options.expectedStatus();
+            boolean bodyMatches = options.expectedContains() == null
+                    || body.contains(options.expectedContains());
+
+            if (statusMatches && bodyMatches) {
                 out.printf("PASS expected=%d actual=%d%n", options.expectedStatus(), actualStatus);
                 return EXIT_PASS;
             }
             out.printf("FAIL expected=%d actual=%d%n", options.expectedStatus(), actualStatus);
+            if (!bodyMatches) {
+                out.printf("reason: response body does not contain expected text: %s%n",
+                        options.expectedContains());
+            }
             return EXIT_FAIL;
         } catch (IllegalArgumentException e) {
             err.println("ERROR " + e.getMessage());
@@ -54,11 +65,12 @@ public final class Main {
         }
     }
 
-    private record Options(URI url, int expectedStatus) {
+    private record Options(URI url, int expectedStatus, String expectedContains) {
 
         static Options parse(String[] args) {
             URI url = null;
             Integer expectedStatus = null;
+            String expectedContains = null;
 
             for (int i = 0; i < args.length; i++) {
                 String argument = args[i];
@@ -72,6 +84,15 @@ public final class Main {
                         throw new IllegalArgumentException("duplicate option: --expect-status");
                     }
                     expectedStatus = parseStatus(valueOf(args, ++i, "--expect-status"));
+                } else if (argument.equals("--expect-contains")) {
+                    if (expectedContains != null) {
+                        throw new IllegalArgumentException("duplicate option: --expect-contains");
+                    }
+                    String value = valueOf(args, ++i, "--expect-contains");
+                    if (value.isEmpty()) {
+                        throw new IllegalArgumentException("--expect-contains must not be empty");
+                    }
+                    expectedContains = value;
                 } else {
                     throw new IllegalArgumentException("unknown argument: " + argument);
                 }
@@ -79,13 +100,13 @@ public final class Main {
 
             if (url == null || expectedStatus == null) {
                 throw new IllegalArgumentException(
-                        "usage: --url <http-or-https-url> --expect-status <code>");
+                        "usage: --url <http-or-https-url> --expect-status <code> [--expect-contains <text>]");
             }
             if (!url.isAbsolute() || url.getHost() == null
                     || !(url.getScheme().equalsIgnoreCase("http") || url.getScheme().equalsIgnoreCase("https"))) {
                 throw new IllegalArgumentException("--url must be an absolute http or https URL: " + url);
             }
-            return new Options(url, expectedStatus);
+            return new Options(url, expectedStatus, expectedContains);
         }
 
         private static String valueOf(String[] args, int index, String option) {
