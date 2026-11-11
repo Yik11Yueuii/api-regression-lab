@@ -296,6 +296,21 @@ class MainTest {
     }
 
     @Test
+    void returnsErrorWithoutLeakingSensitiveHeaderWithControlCharacters() {
+        String sensitiveValue = "Bearer s3cr3t" + (char) 1 + "token";
+
+        Result result = run("--url", url("/ok"), "--expect-status", "200",
+                "--header", "Authorization: " + sensitiveValue);
+
+        assertEquals(2, result.exitCode());
+        assertFalse(result.out().contains("PASS"), result.out());
+        assertTrue(result.err().contains("ERROR"), result.err());
+        assertTrue(result.err().contains("control characters"), result.err());
+        assertFalse(result.out().contains("s3cr3t"), result.out());
+        assertFalse(result.err().contains("s3cr3t"), result.err());
+    }
+
+    @Test
     void sendsSingleQueryParameter() {
         Result result = run("--url", url("/query-echo"), "--expect-status", "200",
                 "--query", "city=Beijing", "--expect-contains", "raw=city=Beijing");

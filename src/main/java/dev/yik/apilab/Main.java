@@ -46,7 +46,13 @@ public final class Main {
                     .timeout(Duration.ofSeconds(30))
                     .GET();
             for (Header header : options.headers()) {
-                requestBuilder.header(header.name(), header.value());
+                try {
+                    requestBuilder.header(header.name(), header.value());
+                } catch (IllegalArgumentException e) {
+                    // The JDK exception message may embed the raw value, so it is never propagated.
+                    throw new IllegalArgumentException(
+                            "header value rejected by JDK HttpClient: " + header.name());
+                }
             }
             HttpRequest request = requestBuilder.build();
             HttpResponse<String> response = client.send(request,
@@ -188,9 +194,9 @@ public final class Main {
             if (!HEADER_NAME.matcher(name).matches()) {
                 throw new IllegalArgumentException("invalid --header value, illegal header name: " + name);
             }
-            if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) {
+            if (containsControlCharacters(value)) {
                 throw new IllegalArgumentException(
-                        "invalid --header value, header value must not contain line breaks");
+                        "invalid --header value, header value must not contain control characters");
             }
             if (RESTRICTED_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
                 throw new IllegalArgumentException("header not allowed by JDK HttpClient: " + name
@@ -250,6 +256,16 @@ public final class Main {
                     || (codePoint >= 'a' && codePoint <= 'z')
                     || (codePoint >= '0' && codePoint <= '9')
                     || codePoint == '-' || codePoint == '.' || codePoint == '_' || codePoint == '~';
+        }
+
+        private static boolean containsControlCharacters(String value) {
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (c < 0x20 || c == 0x7F) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static String valueOf(String[] args, int index, String option) {
