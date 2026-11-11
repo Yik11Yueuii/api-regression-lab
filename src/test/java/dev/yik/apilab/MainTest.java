@@ -14,6 +14,10 @@ import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -48,6 +52,10 @@ class MainTest {
                 "raw=" + exchange.getRequestURI().getRawQuery()));
         server.createContext("/query-decoded", exchange -> respond(exchange, 200,
                 "decoded=" + exchange.getRequestURI().getQuery()));
+        server.createContext("/request-echo", exchange -> {
+            String token = exchange.getRequestHeaders().getFirst("X-Token");
+            respond(exchange, 200, "token=" + token + ";raw=" + exchange.getRequestURI().getRawQuery());
+        });
         server.start();
         port = server.getAddress().getPort();
     }
@@ -410,6 +418,61 @@ class MainTest {
         assertEquals("", query.err());
     }
 
+    @Test
+    void cliProcessReturnsExitCodeZeroAndPassOutput() throws Exception {
+        CliResult result = runCli("--url", url("/request-echo"), "--expect-status", "200",
+                "--header", "X-Token: abc123", "--query", "city=北京",
+                "--expect-contains", "token=abc123;raw=city=%E5%8C%97%E4%BA%AC");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.output().contains("PASS expected=200 actual=200"), result.output());
+    }
+
+    @Test
+    void cliProcessReturnsExitCodeOneOnStatusMismatch() throws Exception {
+        CliResult result = runCli("--url", url("/missing"), "--expect-status", "200");
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.output().contains("FAIL expected=200 actual=404"), result.output());
+    }
+
+    @Test
+    void cliProcessReturnsExitCodeTwoOnInvalidArgument() throws Exception {
+        CliResult result = runCli("--url", url("/ok"), "--expect-status", "200",
+                "--header", "NoColonHere");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.output().contains("ERROR invalid --header value"), result.output());
+    }
+
+    private static CliResult runCli(String... args) throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        command.add("-cp");
+        command.add(Path.of("target", "classes").toAbsolutePath().toString());
+        command.add("dev.yik.apilab.Main");
+        command.addAll(List.of(args));
+        Path outputFile = Files.createTempFile("apilab-cli-", ".log");
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .redirectOutput(outputFile.toFile())
+                .start();
+        try {
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                throw new AssertionError("CLI process did not finish within 10s and was terminated");
+            }
+            return new CliResult(process.exitValue(), Files.readString(outputFile, StandardCharsets.UTF_8));
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            Files.deleteIfExists(outputFile);
+        }
+    }
+
     private String url(String path) {
         return "http://127.0.0.1:" + port + path;
     }
@@ -440,5 +503,8 @@ class MainTest {
     }
 
     private record Result(int exitCode, String out, String err) {
+    }
+
+    private record CliResult(int exitCode, String output) {
     }
 }
