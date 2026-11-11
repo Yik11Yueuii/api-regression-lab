@@ -161,6 +161,7 @@ public final class Main {
                 if (bodyJson.isBlank()) {
                     throw new IllegalArgumentException("--body-json must not be empty for POST");
                 }
+                validateContentTypeHeader(headers);
             } else if (bodyJson != null) {
                 throw new IllegalArgumentException("--body-json is only supported with --method POST");
             }
@@ -193,6 +194,29 @@ public final class Main {
                 }
             }
             return false;
+        }
+
+        /**
+         * A POST request carries at most one explicit Content-Type header, otherwise the default
+         * JSON content type and the user supplied one could conflict. Header names are compared
+         * case-insensitively and values are never echoed back.
+         */
+        private static void validateContentTypeHeader(List<Header> headers) {
+            int count = 0;
+            String value = null;
+            for (Header header : headers) {
+                if (header.name().equalsIgnoreCase("Content-Type")) {
+                    count++;
+                    value = header.value();
+                }
+            }
+            if (count > 1) {
+                throw new IllegalArgumentException(
+                        "duplicate Content-Type header, provide it at most once");
+            }
+            if (count == 1 && value.isEmpty()) {
+                throw new IllegalArgumentException("Content-Type header must not be empty");
+            }
         }
 
         private static Method parseMethod(String value) {

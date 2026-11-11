@@ -511,6 +511,31 @@ class MainTest {
     }
 
     @Test
+    void rejectsDuplicateContentTypeIgnoringNameCase() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--header", "Content-Type: application/json",
+                "--header", "content-type: text/plain");
+
+        assertEquals(2, result.exitCode());
+        assertFalse(result.out().contains("PASS"), result.out());
+        assertTrue(result.err().contains("duplicate Content-Type header"), result.err());
+        assertFalse(result.err().contains("text/plain"), result.err());
+        assertFalse(result.err().contains("application/json"), result.err());
+    }
+
+    @Test
+    void rejectsEmptyContentTypeForPost() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--header", "Content-Type:");
+
+        assertEquals(2, result.exitCode());
+        assertFalse(result.out().contains("PASS"), result.out());
+        assertTrue(result.err().contains("Content-Type header must not be empty"), result.err());
+    }
+
+    @Test
     void postSupportsHeadersAndQueryParameters() {
         Result result = run("--url", url("/post-echo"), "--expect-status", "200",
                 "--method", "POST", "--body-json", "{}",
