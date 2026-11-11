@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本（V1-02）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体，也可从本地 JSON 文件读取一个测试用例，并对 HTTP 状态码和响应体字符串包含关系进行断言。
+一个轻量级 Java API 回归测试工具。当前版本（V1-03）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例并输出汇总。
 
 ## 环境要求
 
@@ -145,6 +145,38 @@ java -jar target/api-regression-lab-0.1.0.jar --file examples/weather-get.json
 - 缺少 `url` 或 `expectStatus` 时直接报错
 - 文件不存在、无法读取或 JSON 格式错误时输出 `ERROR` 并以退出码 2 结束，且不回显文件内容、请求头值或请求体
 - 文件内配置与命令行模式复用同一套校验、请求与断言流程（POST 请求体、Content-Type、请求头、查询参数、PASS/FAIL/ERROR 与退出码 0/1/2）
+- 支持带 UTF-8 BOM 的 JSON 文件（仅兼容文件开头的标准 BOM，不做其他编码猜测）
+
+## 批量执行（suite）
+
+用 `--suite <清单路径>` 顺序执行多个已有测试用例文件：
+
+```bash
+java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json
+```
+
+清单格式（[examples/suite.json](examples/suite.json)）：
+
+```json
+{
+  "cases": [
+    "weather-get.json",
+    "user-create-post.json"
+  ]
+}
+```
+
+规则：
+
+- `cases` 必填，必须是非空字符串数组；未知字段、空数组、非字符串条目都会报 `ERROR`
+- 清单与 `--file`、`--url` 等参数互斥，`--suite` 不可重复
+- 相对路径以 suite 文件所在目录为基准，与当前工作目录无关；绝对路径同样支持（Windows 路径中的反斜杠需写成 `\\`，或改用 `/`）
+- 按数组顺序逐个执行，单个用例 FAIL 或 ERROR 后继续执行剩余用例
+- 每个用例打印一行 `CASE <名称>`，随后是该项的 PASS / FAIL / ERROR 输出
+- 最后打印汇总：`SUMMARY total=N pass=N fail=N error=N`
+- 退出码：全部 PASS 为 0；至少一个 FAIL 且没有 ERROR 为 1；至少一个 ERROR 为 2
+- 清单无法读取、JSON 非法、`cases` 为空或类型错误时直接 `ERROR` 并以退出码 2 结束
+- 不支持嵌套 suite，条目必须指向 V1-02 格式的单用例文件
 
 输出与退出码：
 
@@ -203,13 +235,14 @@ mvn clean test
 - 基于本机 HttpServer 的 JUnit 5 自动化测试
 - 以子进程启动 CLI 的集成测试，覆盖真实进程退出码 0 / 1 / 2
 - `--file` 从本地 JSON 文件读取单个测试用例，字段类型、必填项与未知字段均做严格校验
+- `--suite` 按清单顺序批量执行多个用例，逐项输出结果并打印 `SUMMARY` 汇总，支持相对/绝对路径与 UTF-8 BOM
 - Maven Shade Plugin 打包可自包含运行的 JAR（包含 Jackson）
 
 ## 尚未实现功能
 
 - PUT、DELETE 等其他 HTTP 方法
 - JSON 语法校验与 JSON 字段级断言
-- 批量测试
+- 并发执行、失败重试与用例间变量关联
 - JSON / HTML 测试报告
 - 历史测试结果比较
 - Web GUI

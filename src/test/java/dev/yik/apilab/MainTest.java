@@ -858,6 +858,227 @@ class MainTest {
         assertEquals(2, runCli("--file", errorFile.toString()).exitCode());
     }
 
+    @Test
+    void suiteRunsAllCasesAndSummarizesPasses() throws Exception {
+        Path dir = tempDir.resolve("suite-pass");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        assertTrue(result.out().contains("CASE a.json"), result.out());
+        assertTrue(result.out().contains("CASE b.json"), result.out());
+        assertTrue(result.out().contains("SUMMARY total=2 pass=2 fail=0 error=0"), result.out());
+    }
+
+    @Test
+    void suiteSummarizesFailuresAndExitsOne() throws Exception {
+        Path dir = tempDir.resolve("suite-fail");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", caseJson(url("/text"), 201, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.out().contains("CASE b.json"), result.out());
+        assertTrue(result.out().contains("SUMMARY total=2 pass=1 fail=1 error=0"), result.out());
+    }
+
+    @Test
+    void suiteSummarizesErrorsAndExitsTwo() throws Exception {
+        Path dir = tempDir.resolve("suite-error");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", "{\"url\":\"$URL\",\"bodyJson\":{\"a\":1},\"expectStatus\":200}"
+                .replace("$URL", url("/ok")));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.out().contains("SUMMARY total=2 pass=1 fail=0 error=1"), result.out());
+        assertTrue(result.err().contains("ERROR"), result.err());
+    }
+
+    @Test
+    void suiteKeepsOrderAndContinuesAfterFailuresAndErrors() throws Exception {
+        Path dir = tempDir.resolve("suite-mixed");
+        writeFile(dir, "c1.json", caseJson(url("/text"), 201, "hello world"));
+        writeFile(dir, "c2.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "c3.json", "{\"url\":\"$URL\",\"expectStatus\":200,\"unknownField\":1}"
+                .replace("$URL", url("/ok")));
+        Path suite = writeFile(dir, "suite.json", suiteJson("c1.json", "c2.json", "c3.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        String out = result.out();
+        assertTrue(out.indexOf("CASE c1.json") < out.indexOf("CASE c2.json"), out);
+        assertTrue(out.indexOf("CASE c2.json") < out.indexOf("CASE c3.json"), out);
+        assertTrue(out.contains("SUMMARY total=3 pass=1 fail=1 error=1"), out);
+    }
+
+    @Test
+    void suiteResolvesRelativeEntriesFromSuiteDirectory() throws Exception {
+        Path dir = tempDir.resolve("nested").resolve("cases");
+        writeFile(dir, "only.json", caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("only.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        assertTrue(result.out().contains("SUMMARY total=1 pass=1 fail=0 error=0"), result.out());
+    }
+
+    @Test
+    void suiteSupportsAbsoluteEntryPaths() throws Exception {
+        Path caseFile = writeFile(tempDir.resolve("absolute"), "case.json",
+                caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(tempDir.resolve("absolute-suite"), "suite.json",
+                suiteJson(caseFile.toAbsolutePath().toString()));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        assertTrue(result.out().contains("SUMMARY total=1 pass=1 fail=0 error=0"), result.out());
+    }
+
+    @Test
+    void suiteRejectsInvalidJson() throws Exception {
+        Path suite = writeFile(tempDir.resolve("bad-suite"), "suite.json", "{\"cases\":[ ");
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("invalid JSON in suite file"), result.err());
+        assertFalse(result.err().contains("cases"), result.err());
+    }
+
+    @Test
+    void suiteRejectsEmptyCases() throws Exception {
+        Path suite = writeFile(tempDir.resolve("empty-suite"), "suite.json", "{\"cases\":[]}");
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("field 'cases' must not be empty"), result.err());
+    }
+
+    @Test
+    void suiteRejectsWrongCasesType() throws Exception {
+        Path suite = writeFile(tempDir.resolve("wrong-type-suite"), "suite.json",
+                "{\"cases\":\"a.json\"}");
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("field 'cases' must be an array of strings"), result.err());
+    }
+
+    @Test
+    void suiteRejectsUnknownField() throws Exception {
+        Path suite = writeFile(tempDir.resolve("unknown-suite"), "suite.json",
+                "{\"cases\":[\"a.json\"],\"stopOnFail\":true}");
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("unknown field in suite file: stopOnFail"), result.err());
+    }
+
+    @Test
+    void suiteTreatsMissingCaseFileAsError() throws Exception {
+        Path suite = writeFile(tempDir.resolve("missing-case"), "suite.json",
+                suiteJson("does-not-exist.json"));
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("cannot read test case file"), result.err());
+        assertTrue(result.out().contains("SUMMARY total=1 pass=0 fail=0 error=1"), result.out());
+    }
+
+    @Test
+    void suiteRejectsOtherOptionsAndDuplicates() {
+        Result combined = run("--suite", "suite.json", "--url", url("/ok"));
+        Result duplicated = run("--suite", "a.json", "--suite", "b.json");
+
+        assertEquals(2, combined.exitCode());
+        assertTrue(combined.err().contains("--suite cannot be combined with other options"),
+                combined.err());
+        assertEquals(2, duplicated.exitCode());
+        assertTrue(duplicated.err().contains("duplicate option: --suite"), duplicated.err());
+    }
+
+    @Test
+    void utf8BomIsAcceptedForCaseAndSuiteFiles() throws Exception {
+        Path dir = tempDir.resolve("bom");
+        writeFile(dir, "case.json", "\uFEFF" + caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", "\uFEFF" + suiteJson("case.json"));
+
+        Result single = run("--file", dir.resolve("case.json").toString());
+        Result batch = run("--suite", suite.toString());
+
+        assertEquals(0, single.exitCode(), single.err());
+        assertTrue(single.out().contains("PASS"), single.out());
+        assertEquals(0, batch.exitCode(), batch.err());
+        assertTrue(batch.out().contains("SUMMARY total=1 pass=1 fail=0 error=0"), batch.out());
+    }
+
+    @Test
+    void suiteProcessReturnsRealExitCodes() throws Exception {
+        Path passDir = tempDir.resolve("proc-pass");
+        writeFile(passDir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        Path passSuite = writeFile(passDir, "suite.json", suiteJson("a.json"));
+
+        Path failDir = tempDir.resolve("proc-fail");
+        writeFile(failDir, "a.json", caseJson(url("/text"), 201, "hello world"));
+        Path failSuite = writeFile(failDir, "suite.json", suiteJson("a.json"));
+
+        Path errorDir = tempDir.resolve("proc-error");
+        writeFile(errorDir, "a.json", "{\"url\":\"$URL\",\"expectStatus\":\"200\"}"
+                .replace("$URL", url("/ok")));
+        Path errorSuite = writeFile(errorDir, "suite.json", suiteJson("a.json"));
+
+        CliResult pass = runCli("--suite", passSuite.toString());
+        CliResult fail = runCli("--suite", failSuite.toString());
+        CliResult error = runCli("--suite", errorSuite.toString());
+
+        assertEquals(0, pass.exitCode(), pass.output());
+        assertTrue(pass.output().contains("SUMMARY total=1 pass=1 fail=0 error=0"), pass.output());
+        assertEquals(1, fail.exitCode(), fail.output());
+        assertTrue(fail.output().contains("SUMMARY total=1 pass=0 fail=1 error=0"), fail.output());
+        assertEquals(2, error.exitCode(), error.output());
+        assertTrue(error.output().contains("SUMMARY total=1 pass=0 fail=0 error=1"), error.output());
+    }
+
+    private Path writeFile(Path dir, String name, String content) throws IOException {
+        Files.createDirectories(dir);
+        Path file = dir.resolve(name);
+        Files.writeString(file, content, StandardCharsets.UTF_8);
+        return file;
+    }
+
+    private static String caseJson(String url, int expectStatus, String expectContains) {
+        return "{\"url\":\"" + url + "\",\"expectStatus\":" + expectStatus
+                + ",\"expectContains\":\"" + expectContains + "\"}";
+    }
+
+    private static String suiteJson(String... entries) {
+        StringBuilder json = new StringBuilder("{\"cases\":[");
+        for (int i = 0; i < entries.length; i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append('"')
+                    .append(entries[i].replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append('"');
+        }
+        return json.append("]}").toString();
+    }
+
     private Path writeCase(String json) throws IOException {
         Path file = Files.createTempFile(tempDir, "case-", ".json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
