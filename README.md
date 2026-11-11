@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本（V1-01）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体，并对 HTTP 状态码和响应体字符串包含关系进行断言。
+一个轻量级 Java API 回归测试工具。当前版本（V1-02）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体，也可从本地 JSON 文件读取一个测试用例，并对 HTTP 状态码和响应体字符串包含关系进行断言。
 
 ## 环境要求
 
@@ -21,7 +21,7 @@ mvn clean test
 mvn package
 ```
 
-构建成功后生成可执行 JAR：`target/api-regression-lab-0.1.0.jar`。如果 Maven 默认不是 Java 21，可在当前终端临时切换（不要改系统全局变量）。
+构建成功后生成可执行 JAR：`target/api-regression-lab-0.1.0.jar`。JAR 通过 Maven Shade Plugin 打包，已内置 JSON 解析依赖（Jackson），可直接 `java -jar` 运行，无需额外配置 classpath。如果 Maven 默认不是 Java 21，可在当前终端临时切换（不要改系统全局变量）。
 
 PowerShell：
 
@@ -109,6 +109,43 @@ java -jar target/api-regression-lab-0.1.0.jar --url 'http://localhost:8080/api/w
 - URL 中已有的查询参数会被完整保留，新参数追加在其后
 - 输入中已经合法的 `%XX` 百分号编码不会被重复编码
 
+## JSON 文件模式
+
+用 `--file <路径>` 从本地 JSON 文件读取一个测试用例，路径可以是相对路径或绝对路径：
+
+```bash
+java -jar target/api-regression-lab-0.1.0.jar --file examples/weather-get.json
+```
+
+文件模式与命令行模式互斥：`--file` 不能与 `--url`、`--method`、`--body-json`、`--expect-status`、`--expect-contains`、`--header`、`--query` 混用，也不能重复提供。
+
+字段说明：
+
+| 字段 | 必填 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `url` | 是 | 字符串 | 目标地址，必须是绝对 http/https URL |
+| `method` | 否 | 字符串 | `GET` 或 `POST`，默认 `GET` |
+| `headers` | 否 | 字符串数组 | 每项使用 `Name: Value` 格式，规则与 `--header` 相同 |
+| `query` | 否 | 字符串数组 | 每项使用 `name=value` 格式，保留原有顺序与重复参数 |
+| `bodyJson` | 否 | JSON 对象或数组 | POST 请求体，自动序列化为 UTF-8 JSON；GET 提供时报错 |
+| `expectStatus` | 是 | 整数 | 100-599 |
+| `expectContains` | 否 | 非空字符串 | 响应体包含断言 |
+
+完整示例：[examples/weather-get.json](examples/weather-get.json)（GET + 中文查询参数）和 [examples/user-create-post.json](examples/user-create-post.json)（POST + 中文 JSON 请求体）。
+
+这两个示例指向 `http://localhost:8080` 的本地模拟服务，不依赖任何外部或公司内部接口，验证前需要自行启动满足以下行为的服务：
+
+- `GET /api/weather?city=<城市>`：返回 200，响应体包含 `多云`
+- `POST /api/users`：返回 201，响应体包含 `id`，并接收 UTF-8 JSON 请求体
+
+文件校验规则：
+
+- 字段类型严格匹配，不做隐式转换，例如 `"expectStatus": "200"`（字符串）会报错
+- 未知字段会报明确错误，避免拼写错误导致配置被静默忽略
+- 缺少 `url` 或 `expectStatus` 时直接报错
+- 文件不存在、无法读取或 JSON 格式错误时输出 `ERROR` 并以退出码 2 结束，且不回显文件内容、请求头值或请求体
+- 文件内配置与命令行模式复用同一套校验、请求与断言流程（POST 请求体、Content-Type、请求头、查询参数、PASS/FAIL/ERROR 与退出码 0/1/2）
+
 输出与退出码：
 
 | 情况 | 输出 | 退出码 |
@@ -165,12 +202,13 @@ mvn clean test
 - 退出码 0（PASS）、1（FAIL）、2（ERROR）
 - 基于本机 HttpServer 的 JUnit 5 自动化测试
 - 以子进程启动 CLI 的集成测试，覆盖真实进程退出码 0 / 1 / 2
+- `--file` 从本地 JSON 文件读取单个测试用例，字段类型、必填项与未知字段均做严格校验
+- Maven Shade Plugin 打包可自包含运行的 JAR（包含 Jackson）
 
 ## 尚未实现功能
 
 - PUT、DELETE 等其他 HTTP 方法
 - JSON 语法校验与 JSON 字段级断言
-- JSON 测试用例读取
 - 批量测试
 - JSON / HTML 测试报告
 - 历史测试结果比较

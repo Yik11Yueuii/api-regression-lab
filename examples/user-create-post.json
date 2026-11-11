@@ -1,0 +1,11 @@
+{
+  "url": "http://localhost:8080/api/users",
+  "method": "POST",
+  "headers": ["Accept: application/json"],
+  "bodyJson": {
+    "name": "张三",
+    "city": "北京"
+  },
+  "expectStatus": 201,
+  "expectContains": "id"
+}
