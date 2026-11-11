@@ -14,6 +14,7 @@ import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +52,10 @@ class MainTest {
                 "raw=" + exchange.getRequestURI().getRawQuery()));
         server.createContext("/query-decoded", exchange -> respond(exchange, 200,
                 "decoded=" + exchange.getRequestURI().getQuery()));
+        server.createContext("/request-echo", exchange -> {
+            String token = exchange.getRequestHeaders().getFirst("X-Token");
+            respond(exchange, 200, "token=" + token + ";raw=" + exchange.getRequestURI().getRawQuery());
+        });
         server.start();
         port = server.getAddress().getPort();
     }
@@ -415,9 +420,9 @@ class MainTest {
 
     @Test
     void cliProcessReturnsExitCodeZeroAndPassOutput() throws Exception {
-        CliResult result = runCli("--url", url("/query-echo"), "--expect-status", "200",
+        CliResult result = runCli("--url", url("/request-echo"), "--expect-status", "200",
                 "--header", "X-Token: abc123", "--query", "city=北京",
-                "--expect-contains", "raw=city=%E5%8C%97%E4%BA%AC");
+                "--expect-contains", "token=abc123;raw=city=%E5%8C%97%E4%BA%AC");
 
         assertEquals(0, result.exitCode());
         assertTrue(result.output().contains("PASS expected=200 actual=200"), result.output());
@@ -447,13 +452,25 @@ class MainTest {
         command.add(Path.of("target", "classes").toAbsolutePath().toString());
         command.add("dev.yik.apilab.Main");
         command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String output;
-        try (var stdout = process.getInputStream()) {
-            output = new String(stdout.readAllBytes(), StandardCharsets.UTF_8);
+        Path outputFile = Files.createTempFile("apilab-cli-", ".log");
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .redirectOutput(outputFile.toFile())
+                .start();
+        try {
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                throw new AssertionError("CLI process did not finish within 10s and was terminated");
+            }
+            return new CliResult(process.exitValue(), Files.readString(outputFile, StandardCharsets.UTF_8));
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            Files.deleteIfExists(outputFile);
         }
-        assertTrue(process.waitFor(20, TimeUnit.SECONDS), "CLI process did not finish in time");
-        return new CliResult(process.exitValue(), output);
     }
 
     private String url(String path) {
