@@ -1,0 +1,6 @@
+{
+  "cases": [
+    "weather-get.json",
+    "user-create-post.json"
+  ]
+}

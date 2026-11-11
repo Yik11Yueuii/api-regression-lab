@@ -49,10 +49,90 @@ public final class Main {
 
     static int execute(String[] args, PrintStream out, PrintStream err) {
         try {
-            Options options = Options.load(args);
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
+            String suitePath = suitePathFrom(args);
+            if (suitePath != null) {
+                return runSuite(Path.of(suitePath), out, err);
+            }
+            return runCase(Options.load(args), newClient(), out, err);
+        } catch (IllegalArgumentException e) {
+            err.println("ERROR " + e.getMessage());
+            return EXIT_ERROR;
+        }
+    }
+
+    private static HttpClient newClient() {
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
+    }
+
+    /**
+     * Returns the suite file path when {@code --suite} is used and null otherwise. Suite mode is
+     * mutually exclusive with the single case modes so a run never mixes both.
+     */
+    private static String suitePathFrom(String[] args) {
+        int count = 0;
+        int index = -1;
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("--suite")) {
+                count++;
+                index = i;
+            }
+        }
+        if (count == 0) {
+            return null;
+        }
+        if (count > 1) {
+            throw new IllegalArgumentException("duplicate option: --suite");
+        }
+        if (args.length == 1) {
+            throw new IllegalArgumentException("missing value for --suite");
+        }
+        if (args.length != 2 || index != 0) {
+            throw new IllegalArgumentException("--suite cannot be combined with other options");
+        }
+        return args[1];
+    }
+
+    /**
+     * Runs every case of a suite in declaration order, keeps going after FAIL or ERROR, and prints
+     * one line per case plus the final summary. ERROR dominates FAIL in the exit code.
+     */
+    private static int runSuite(Path suiteFile, PrintStream out, PrintStream err) {
+        List<SuiteCase> cases = SuiteCase.load(suiteFile);
+        HttpClient client = newClient();
+        int pass = 0;
+        int fail = 0;
+        int error = 0;
+        for (SuiteCase suiteCase : cases) {
+            out.println("CASE " + suiteCase.label());
+            int code;
+            try {
+                code = runCase(Options.fromFile(suiteCase.path()), client, out, err);
+            } catch (IllegalArgumentException e) {
+                err.println("ERROR " + e.getMessage());
+                code = EXIT_ERROR;
+            }
+            switch (code) {
+                case EXIT_PASS -> pass++;
+                case EXIT_FAIL -> fail++;
+                default -> error++;
+            }
+        }
+        out.printf("SUMMARY total=%d pass=%d fail=%d error=%d%n",
+                cases.size(), pass, fail, error);
+        if (error > 0) {
+            return EXIT_ERROR;
+        }
+        if (fail > 0) {
+            return EXIT_FAIL;
+        }
+        return EXIT_PASS;
+    }
+
+    private static int runCase(Options options, HttpClient client,
+                               PrintStream out, PrintStream err) {
+        try {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(options.requestUri())
                     .timeout(Duration.ofSeconds(30));
             if (options.method() == Method.POST) {
@@ -101,6 +181,72 @@ public final class Main {
             Thread.currentThread().interrupt();
             err.println("ERROR request interrupted");
             return EXIT_ERROR;
+        }
+    }
+
+    /**
+     * Reads a JSON object from a UTF-8 file and tolerates a leading UTF-8 BOM (written by some
+     * Windows editors); no other encoding is guessed. Parser messages are never forwarded because
+     * they quote the source text.
+     */
+    private static JsonNode readJsonObject(Path path, String what) {
+        String content;
+        try {
+            content = Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("cannot read " + what + ": " + path);
+        }
+        if (!content.isEmpty() && content.charAt(0) == '\uFEFF') {
+            content = content.substring(1);
+        }
+        JsonNode root;
+        try {
+            root = JSON.readTree(content);
+        } catch (JacksonException e) {
+            throw new IllegalArgumentException("invalid JSON in " + what + ": " + path);
+        }
+        if (root == null || !root.isObject()) {
+            throw new IllegalArgumentException(what + " must contain a JSON object: " + path);
+        }
+        return root;
+    }
+
+    private record SuiteCase(String label, Path path) {
+
+        /**
+         * Loads the suite manifest. Relative entries are resolved against the suite file directory,
+         * not the process working directory, and each entry must be a non-empty string.
+         */
+        static List<SuiteCase> load(Path suiteFile) {
+            JsonNode root = readJsonObject(suiteFile, "suite file");
+            root.fieldNames().forEachRemaining(field -> {
+                if (!field.equals("cases")) {
+                    throw new IllegalArgumentException("unknown field in suite file: " + field);
+                }
+            });
+            JsonNode casesNode = root.get("cases");
+            if (casesNode == null) {
+                throw new IllegalArgumentException("missing required field in suite file: cases");
+            }
+            if (!casesNode.isArray()) {
+                throw new IllegalArgumentException("field 'cases' must be an array of strings");
+            }
+            if (casesNode.isEmpty()) {
+                throw new IllegalArgumentException("field 'cases' must not be empty");
+            }
+            Path base = suiteFile.toAbsolutePath().getParent();
+            List<SuiteCase> cases = new ArrayList<>();
+            for (JsonNode item : casesNode) {
+                if (!item.isTextual()) {
+                    throw new IllegalArgumentException("field 'cases' must be an array of strings");
+                }
+                String entry = item.textValue();
+                if (entry.isBlank()) {
+                    throw new IllegalArgumentException("field 'cases' must not contain empty entries");
+                }
+                cases.add(new SuiteCase(entry, base.resolve(entry).normalize()));
+            }
+            return List.copyOf(cases);
         }
     }
 
@@ -204,21 +350,7 @@ public final class Main {
          * message, which could quote it.
          */
         static Options fromFile(Path path) {
-            String content;
-            try {
-                content = Files.readString(path, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                throw new IllegalArgumentException("cannot read test case file: " + path);
-            }
-            JsonNode root;
-            try {
-                root = JSON.readTree(content);
-            } catch (JacksonException e) {
-                throw new IllegalArgumentException("invalid JSON in test case file: " + path);
-            }
-            if (root == null || !root.isObject()) {
-                throw new IllegalArgumentException("test case file must contain a JSON object: " + path);
-            }
+            JsonNode root = readJsonObject(path, "test case file");
             root.fieldNames().forEachRemaining(field -> {
                 if (!CASE_FIELDS.contains(field)) {
                     throw new IllegalArgumentException("unknown field in test case file: " + field);
