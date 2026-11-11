@@ -1,0 +1,7 @@
+{
+  "url": "http://localhost:8080/api/weather",
+  "method": "GET",
+  "query": ["city=北京"],
+  "expectStatus": 200,
+  "expectContains": "多云"
+}

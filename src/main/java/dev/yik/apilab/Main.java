@@ -1,5 +1,9 @@
 package dev.yik.apilab;
 
+import com.fasterxml.jackson.core.JacksonException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
@@ -7,6 +11,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +35,11 @@ public final class Main {
 
     private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+");
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private static final Set<String> CASE_FIELDS = Set.of(
+            "url", "method", "headers", "query", "bodyJson", "expectStatus", "expectContains");
+
     private Main() {
     }
 
@@ -38,7 +49,7 @@ public final class Main {
 
     static int execute(String[] args, PrintStream out, PrintStream err) {
         try {
-            Options options = Options.parse(args);
+            Options options = Options.load(args);
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
@@ -152,7 +163,171 @@ public final class Main {
                         "usage: --url <http-or-https-url> --expect-status <code>"
                                 + " [--method GET|POST] [--body-json <json>]"
                                 + " [--expect-contains <text>]"
-                                + " [--header \"Name: Value\"]... [--query \"name=value\"]...");
+                                + " [--header \"Name: Value\"]... [--query \"name=value\"]..."
+                                + " | --file <test-case.json>");
+            }
+            return of(url, method, bodyJson, expectedStatus, expectedContains, headers, queries);
+        }
+
+        /**
+         * Chooses between CLI arguments and a JSON case file. The two modes are mutually
+         * exclusive so that neither silently overrides the other.
+         */
+        static Options load(String[] args) {
+            int fileOptionIndex = -1;
+            int fileOptionCount = 0;
+            for (int i = 0; i < args.length; i++) {
+                if (args[i].equals("--file")) {
+                    fileOptionIndex = i;
+                    fileOptionCount++;
+                }
+            }
+            if (fileOptionCount == 0) {
+                return parse(args);
+            }
+            if (fileOptionCount > 1) {
+                throw new IllegalArgumentException("duplicate option: --file");
+            }
+            if (args.length == 1) {
+                throw new IllegalArgumentException("missing value for --file");
+            }
+            if (args.length != 2 || fileOptionIndex != 0) {
+                throw new IllegalArgumentException("--file cannot be combined with other options");
+            }
+            return fromFile(Path.of(args[1]));
+        }
+
+        /**
+         * Reads one test case from a JSON file. Field names, types and required fields are
+         * validated explicitly; unknown fields are reported so a typo cannot silently disable part
+         * of a test case. Parsing failures never echo the file content or the underlying parser
+         * message, which could quote it.
+         */
+        static Options fromFile(Path path) {
+            String content;
+            try {
+                content = Files.readString(path, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new IllegalArgumentException("cannot read test case file: " + path);
+            }
+            JsonNode root;
+            try {
+                root = JSON.readTree(content);
+            } catch (JacksonException e) {
+                throw new IllegalArgumentException("invalid JSON in test case file: " + path);
+            }
+            if (root == null || !root.isObject()) {
+                throw new IllegalArgumentException("test case file must contain a JSON object: " + path);
+            }
+            root.fieldNames().forEachRemaining(field -> {
+                if (!CASE_FIELDS.contains(field)) {
+                    throw new IllegalArgumentException("unknown field in test case file: " + field);
+                }
+            });
+
+            JsonNode urlNode = require(root, "url");
+            if (!urlNode.isTextual()) {
+                throw new IllegalArgumentException("field 'url' must be a string");
+            }
+            String rawUrl = urlNode.textValue();
+            if (rawUrl.isBlank()) {
+                throw new IllegalArgumentException("field 'url' must not be empty");
+            }
+            URI url;
+            try {
+                url = URI.create(rawUrl);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("field 'url' is not a valid URI");
+            }
+
+            Method method = Method.GET;
+            JsonNode methodNode = root.get("method");
+            if (methodNode != null) {
+                if (!methodNode.isTextual()) {
+                    throw new IllegalArgumentException("field 'method' must be a string");
+                }
+                method = parseMethod(methodNode.textValue());
+            }
+
+            List<Header> headers = new ArrayList<>();
+            JsonNode headersNode = root.get("headers");
+            if (headersNode != null) {
+                if (!headersNode.isArray()) {
+                    throw new IllegalArgumentException("field 'headers' must be an array of strings");
+                }
+                for (JsonNode item : headersNode) {
+                    if (!item.isTextual()) {
+                        throw new IllegalArgumentException("field 'headers' must be an array of strings");
+                    }
+                    headers.add(parseHeader(item.textValue()));
+                }
+            }
+
+            List<QueryParam> queries = new ArrayList<>();
+            JsonNode queryNode = root.get("query");
+            if (queryNode != null) {
+                if (!queryNode.isArray()) {
+                    throw new IllegalArgumentException("field 'query' must be an array of strings");
+                }
+                for (JsonNode item : queryNode) {
+                    if (!item.isTextual()) {
+                        throw new IllegalArgumentException("field 'query' must be an array of strings");
+                    }
+                    queries.add(parseQuery(item.textValue()));
+                }
+            }
+
+            String bodyJson = null;
+            JsonNode bodyNode = root.get("bodyJson");
+            if (bodyNode != null) {
+                if (!bodyNode.isObject() && !bodyNode.isArray()) {
+                    throw new IllegalArgumentException("field 'bodyJson' must be a JSON object or array");
+                }
+                try {
+                    bodyJson = JSON.writeValueAsString(bodyNode);
+                } catch (JacksonException e) {
+                    throw new IllegalArgumentException("field 'bodyJson' could not be serialized");
+                }
+            }
+
+            JsonNode statusNode = require(root, "expectStatus");
+            if (!statusNode.isIntegralNumber() || !statusNode.canConvertToInt()) {
+                throw new IllegalArgumentException("field 'expectStatus' must be an integer");
+            }
+
+            String expectedContains = null;
+            JsonNode containsNode = root.get("expectContains");
+            if (containsNode != null) {
+                if (!containsNode.isTextual()) {
+                    throw new IllegalArgumentException("field 'expectContains' must be a string");
+                }
+                expectedContains = containsNode.textValue();
+                if (expectedContains.isEmpty()) {
+                    throw new IllegalArgumentException("field 'expectContains' must not be empty");
+                }
+            }
+
+            return of(url, method, bodyJson, statusNode.intValue(), expectedContains, headers, queries);
+        }
+
+        private static JsonNode require(JsonNode root, String field) {
+            JsonNode node = root.get(field);
+            if (node == null) {
+                throw new IllegalArgumentException("missing required field in test case file: " + field);
+            }
+            return node;
+        }
+
+        private static Options of(URI url, Method method, String bodyJson, int expectedStatus,
+                                  String expectedContains, List<Header> headers,
+                                  List<QueryParam> queries) {
+            if (!url.isAbsolute() || url.getHost() == null
+                    || !(url.getScheme().equalsIgnoreCase("http") || url.getScheme().equalsIgnoreCase("https"))) {
+                throw new IllegalArgumentException("--url must be an absolute http or https URL: " + url);
+            }
+            if (expectedStatus < 100 || expectedStatus > 599) {
+                throw new IllegalArgumentException(
+                        "--expect-status must be between 100 and 599: " + expectedStatus);
             }
             if (method == Method.POST) {
                 if (bodyJson == null) {
@@ -164,10 +339,6 @@ public final class Main {
                 validateContentTypeHeader(headers);
             } else if (bodyJson != null) {
                 throw new IllegalArgumentException("--body-json is only supported with --method POST");
-            }
-            if (!url.isAbsolute() || url.getHost() == null
-                    || !(url.getScheme().equalsIgnoreCase("http") || url.getScheme().equalsIgnoreCase("https"))) {
-                throw new IllegalArgumentException("--url must be an absolute http or https URL: " + url);
             }
             return new Options(url, method, bodyJson, expectedStatus, expectedContains,
                     List.copyOf(headers), List.copyOf(queries));

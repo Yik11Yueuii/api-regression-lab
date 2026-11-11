@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -29,6 +30,9 @@ class MainTest {
 
     private HttpServer server;
     private int port;
+
+    @TempDir
+    Path tempDir;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -58,9 +62,10 @@ class MainTest {
         });
         server.createContext("/post-echo", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            List<String> contentTypes = exchange.getRequestHeaders().get("Content-Type");
             respond(exchange, 200, "method=" + exchange.getRequestMethod()
                     + ";contentType=" + exchange.getRequestHeaders().getFirst("Content-Type")
-                    + ";contentTypeCount=" + exchange.getRequestHeaders().get("Content-Type").size()
+                    + ";contentTypeCount=" + (contentTypes == null ? 0 : contentTypes.size())
                     + ";body=" + body
                     + ";rawQuery=" + exchange.getRequestURI().getRawQuery()
                     + ";token=" + exchange.getRequestHeaders().getFirst("X-Token"));
@@ -628,11 +633,242 @@ class MainTest {
         assertTrue(result.output().contains("PASS expected=200 actual=200"), result.output());
     }
 
+    @Test
+    void fileModeGetCasePasses() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "method": "GET",
+                  "query": ["city=北京"],
+                  "expectStatus": 200,
+                  "expectContains": "raw=city=%E5%8C%97%E4%BA%AC"
+                }
+                """.replace("$URL", url("/query-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS expected=200 actual=200"), result.out());
+        assertEquals("", result.err());
+    }
+
+    @Test
+    void fileModePostCaseSendsJsonBody() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "method": "POST",
+                  "headers": ["X-Token: abc123"],
+                  "bodyJson": {"name": "张三", "city": "北京"},
+                  "expectStatus": 200,
+                  "expectContains": "method=POST;contentType=application/json; charset=utf-8;contentTypeCount=1;body={\\"name\\":\\"张三\\",\\"city\\":\\"北京\\"};rawQuery=null;token=abc123"
+                }
+                """.replace("$URL", url("/post-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS expected=200 actual=200"), result.out());
+        assertEquals("", result.err());
+    }
+
+    @Test
+    void fileModeAcceptsJsonArrayBody() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "method": "POST",
+                  "bodyJson": [1, 2, 3],
+                  "expectStatus": 200,
+                  "expectContains": "body=[1,2,3]"
+                }
+                """.replace("$URL", url("/post-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void fileModeKeepsHeaderAndRepeatedQueryOrder() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "headers": ["X-Token: abc123"],
+                  "query": ["city=北京", "city=上海", "empty="],
+                  "expectStatus": 200,
+                  "expectContains": "rawQuery=city=%E5%8C%97%E4%BA%AC&city=%E4%B8%8A%E6%B5%B7&empty=;token=abc123"
+                }
+                """.replace("$URL", url("/post-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void fileModeRejectsMissingRequiredField() throws Exception {
+        Path file = writeCase("""
+                {
+                  "expectStatus": 200
+                }
+                """);
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("missing required field in test case file: url"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsWrongFieldType() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "expectStatus": "200"
+                }
+                """.replace("$URL", url("/ok")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("field 'expectStatus' must be an integer"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsUnknownField() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "expectStatus": 200,
+                  "expectContain": "hello"
+                }
+                """.replace("$URL", url("/ok")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("unknown field in test case file: expectContain"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsInvalidJsonWithoutEchoingContent() throws Exception {
+        Path file = writeCase("""
+                { "url": "$URL", "expectStatus": 200,
+                """.replace("$URL", url("/ok")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("invalid JSON in test case file"), result.err());
+        assertFalse(result.err().contains("127.0.0.1"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsMissingFile() {
+        Path missing = tempDir.resolve("does-not-exist.json");
+
+        Result result = run("--file", missing.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("cannot read test case file"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsDuplicateFileOption() {
+        Result result = run("--file", "a.json", "--file", "b.json");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("duplicate option: --file"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsCliOptions() {
+        Result result = run("--file", "a.json", "--url", url("/ok"));
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("--file cannot be combined with other options"), result.err());
+    }
+
+    @Test
+    void fileModeValidatesRequestConfiguration() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "bodyJson": {"a": 1},
+                  "expectStatus": 200
+                }
+                """.replace("$URL", url("/ok")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("--body-json is only supported with --method POST"), result.err());
+    }
+
+    @Test
+    void fileModePostRequiresBody() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "method": "POST",
+                  "expectStatus": 200
+                }
+                """.replace("$URL", url("/post-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("POST requires --body-json"), result.err());
+    }
+
+    @Test
+    void fileModeRejectsNonContainerBodyJson() throws Exception {
+        Path file = writeCase("""
+                {
+                  "url": "$URL",
+                  "method": "POST",
+                  "bodyJson": "plain text",
+                  "expectStatus": 200
+                }
+                """.replace("$URL", url("/post-echo")));
+
+        Result result = run("--file", file.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("field 'bodyJson' must be a JSON object or array"), result.err());
+    }
+
+    @Test
+    void fileModeProcessReturnsRealExitCodes() throws Exception {
+        Path passFile = writeCase("""
+                { "url": "$URL", "expectStatus": 200, "expectContains": "hello" }
+                """.replace("$URL", url("/text")));
+        Path failFile = writeCase("""
+                { "url": "$URL", "expectStatus": 201 }
+                """.replace("$URL", url("/text")));
+        Path errorFile = writeCase("""
+                { "url": "$URL", "expectStatus": 200, "unknownField": true }
+                """.replace("$URL", url("/text")));
+
+        assertEquals(0, runCli("--file", passFile.toString()).exitCode());
+        assertEquals(1, runCli("--file", failFile.toString()).exitCode());
+        assertEquals(2, runCli("--file", errorFile.toString()).exitCode());
+    }
+
+    private Path writeCase(String json) throws IOException {
+        Path file = Files.createTempFile(tempDir, "case-", ".json");
+        Files.writeString(file, json, StandardCharsets.UTF_8);
+        return file;
+    }
+
     private static CliResult runCli(String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add("-cp");
-        command.add(Path.of("target", "classes").toAbsolutePath().toString());
+        command.add(subprocessClasspath());
         command.add("dev.yik.apilab.Main");
         command.addAll(List.of(args));
         Path outputFile = Files.createTempFile("apilab-cli-", ".log");
@@ -654,6 +890,18 @@ class MainTest {
             }
             Files.deleteIfExists(outputFile);
         }
+    }
+
+    /**
+     * Surefire publishes the full test classpath (including the Jackson runtime jars) in this
+     * property, so a subprocess can load the same classes as the test JVM.
+     */
+    private static String subprocessClasspath() {
+        String classpath = System.getProperty("surefire.test.class.path");
+        if (classpath == null || classpath.isBlank()) {
+            classpath = Path.of("target", "classes").toAbsolutePath().toString();
+        }
+        return classpath;
     }
 
     private String url(String path) {
