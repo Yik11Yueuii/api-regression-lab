@@ -43,9 +43,14 @@ public final class Main {
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(options.requestUri())
-                    .timeout(Duration.ofSeconds(30))
-                    .GET();
-            for (Header header : options.headers()) {
+                    .timeout(Duration.ofSeconds(30));
+            if (options.method() == Method.POST) {
+                requestBuilder.POST(HttpRequest.BodyPublishers
+                        .ofString(options.bodyJson(), StandardCharsets.UTF_8));
+            } else {
+                requestBuilder.GET();
+            }
+            for (Header header : options.effectiveHeaders()) {
                 try {
                     requestBuilder.header(header.name(), header.value());
                 } catch (IllegalArgumentException e) {
@@ -88,11 +93,14 @@ public final class Main {
         }
     }
 
-    private record Options(URI url, int expectedStatus, String expectedContains,
-                           List<Header> headers, List<QueryParam> queries) {
+    private record Options(URI url, Method method, String bodyJson, int expectedStatus,
+                           String expectedContains, List<Header> headers, List<QueryParam> queries) {
 
         static Options parse(String[] args) {
             URI url = null;
+            Method method = Method.GET;
+            boolean methodProvided = false;
+            String bodyJson = null;
             Integer expectedStatus = null;
             String expectedContains = null;
             List<Header> headers = new ArrayList<>();
@@ -105,6 +113,17 @@ public final class Main {
                         throw new IllegalArgumentException("duplicate option: --url");
                     }
                     url = URI.create(valueOf(args, ++i, "--url"));
+                } else if (argument.equals("--method")) {
+                    if (methodProvided) {
+                        throw new IllegalArgumentException("duplicate option: --method");
+                    }
+                    methodProvided = true;
+                    method = parseMethod(valueOf(args, ++i, "--method"));
+                } else if (argument.equals("--body-json")) {
+                    if (bodyJson != null) {
+                        throw new IllegalArgumentException("duplicate option: --body-json");
+                    }
+                    bodyJson = valueOf(args, ++i, "--body-json");
                 } else if (argument.equals("--expect-status")) {
                     if (expectedStatus != null) {
                         throw new IllegalArgumentException("duplicate option: --expect-status");
@@ -131,15 +150,60 @@ public final class Main {
             if (url == null || expectedStatus == null) {
                 throw new IllegalArgumentException(
                         "usage: --url <http-or-https-url> --expect-status <code>"
+                                + " [--method GET|POST] [--body-json <json>]"
                                 + " [--expect-contains <text>]"
                                 + " [--header \"Name: Value\"]... [--query \"name=value\"]...");
+            }
+            if (method == Method.POST) {
+                if (bodyJson == null) {
+                    throw new IllegalArgumentException("POST requires --body-json");
+                }
+                if (bodyJson.isBlank()) {
+                    throw new IllegalArgumentException("--body-json must not be empty for POST");
+                }
+            } else if (bodyJson != null) {
+                throw new IllegalArgumentException("--body-json is only supported with --method POST");
             }
             if (!url.isAbsolute() || url.getHost() == null
                     || !(url.getScheme().equalsIgnoreCase("http") || url.getScheme().equalsIgnoreCase("https"))) {
                 throw new IllegalArgumentException("--url must be an absolute http or https URL: " + url);
             }
-            return new Options(url, expectedStatus, expectedContains,
+            return new Options(url, method, bodyJson, expectedStatus, expectedContains,
                     List.copyOf(headers), List.copyOf(queries));
+        }
+
+        /**
+         * Returns the headers actually sent: for POST a default JSON content type is added unless
+         * the caller supplied one explicitly, in which case the caller's value wins and no
+         * duplicate is added.
+         */
+        List<Header> effectiveHeaders() {
+            if (method != Method.POST || hasHeader("Content-Type")) {
+                return headers;
+            }
+            List<Header> effective = new ArrayList<>(headers);
+            effective.add(new Header("Content-Type", "application/json; charset=utf-8"));
+            return effective;
+        }
+
+        private boolean hasHeader(String name) {
+            for (Header header : headers) {
+                if (header.name().equalsIgnoreCase(name)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static Method parseMethod(String value) {
+            String normalized = value.trim().toUpperCase(Locale.ROOT);
+            if (normalized.equals("GET")) {
+                return Method.GET;
+            }
+            if (normalized.equals("POST")) {
+                return Method.POST;
+            }
+            throw new IllegalArgumentException("--method must be GET or POST: " + value);
         }
 
         /**
@@ -287,6 +351,10 @@ public final class Main {
             }
             return status;
         }
+    }
+
+    private enum Method {
+        GET, POST
     }
 
     private record Header(String name, String value) {

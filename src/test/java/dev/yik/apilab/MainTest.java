@@ -56,6 +56,19 @@ class MainTest {
             String token = exchange.getRequestHeaders().getFirst("X-Token");
             respond(exchange, 200, "token=" + token + ";raw=" + exchange.getRequestURI().getRawQuery());
         });
+        server.createContext("/post-echo", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            respond(exchange, 200, "method=" + exchange.getRequestMethod()
+                    + ";contentType=" + exchange.getRequestHeaders().getFirst("Content-Type")
+                    + ";contentTypeCount=" + exchange.getRequestHeaders().get("Content-Type").size()
+                    + ";body=" + body
+                    + ";rawQuery=" + exchange.getRequestURI().getRawQuery()
+                    + ";token=" + exchange.getRequestHeaders().getFirst("X-Token"));
+        });
+        server.createContext("/post-created", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            respond(exchange, 201, "{\"id\":1}");
+        });
         server.start();
         port = server.getAddress().getPort();
     }
@@ -443,6 +456,151 @@ class MainTest {
 
         assertEquals(2, result.exitCode());
         assertTrue(result.output().contains("ERROR invalid --header value"), result.output());
+    }
+
+    @Test
+    void postJsonBodyPassesAndServerReceivesPost() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{\"name\":\"demo\"}",
+                "--expect-contains", "method=POST;");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS expected=200 actual=200"), result.out());
+        assertEquals("", result.err());
+    }
+
+    @Test
+    void postSendsExactJsonBody() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{\"id\":42,\"active\":true}",
+                "--expect-contains", ";body={\"id\":42,\"active\":true}");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void postSendsChineseJsonBodyAsUtf8() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{\"name\":\"张三\",\"city\":\"北京\"}",
+                "--expect-contains", ";body={\"name\":\"张三\",\"city\":\"北京\"}");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void postSendsDefaultJsonContentType() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--expect-contains", "contentType=application/json; charset=utf-8;contentTypeCount=1");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void explicitContentTypeWinsWithoutDuplicate() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--header", "Content-Type: application/vnd.api+json",
+                "--expect-contains", "contentType=application/vnd.api+json;contentTypeCount=1");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void postSupportsHeadersAndQueryParameters() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--header", "X-Token: abc123", "--query", "city=北京",
+                "--expect-contains", "rawQuery=city=%E5%8C%97%E4%BA%AC;token=abc123");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.out().contains("PASS"), result.out());
+    }
+
+    @Test
+    void postFailsWhenStatusDoesNotMatch() {
+        Result result = run("--url", url("/post-created"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}");
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.out().contains("FAIL expected=200 actual=201"), result.out());
+        assertEquals("", result.err());
+    }
+
+    @Test
+    void postFailsWhenResponseBodyAssertionFails() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{}",
+                "--expect-contains", "not-present");
+
+        assertEquals(1, result.exitCode());
+        assertTrue(result.out().contains("FAIL"), result.out());
+        assertTrue(result.out().contains("reason: response body does not contain expected text"),
+                result.out());
+    }
+
+    @Test
+    void getKeepsOriginalBehaviorWithoutNewOptions() {
+        Result implicit = run("--url", url("/text"), "--expect-status", "200",
+                "--expect-contains", "hello world");
+        Result explicit = run("--url", url("/text"), "--expect-status", "200",
+                "--method", "GET", "--expect-contains", "hello world");
+
+        assertEquals(0, implicit.exitCode());
+        assertTrue(implicit.out().contains("PASS"), implicit.out());
+        assertEquals(0, explicit.exitCode());
+        assertTrue(explicit.out().contains("PASS"), explicit.out());
+        assertEquals("", implicit.err());
+        assertEquals("", explicit.err());
+    }
+
+    @Test
+    void rejectsBodyJsonWhenMethodIsGet() {
+        Result result = run("--url", url("/text"), "--expect-status", "200",
+                "--body-json", "{\"a\":1}");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("--body-json is only supported with --method POST"), result.err());
+    }
+
+    @Test
+    void rejectsPostWithoutBody() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200", "--method", "POST");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("POST requires --body-json"), result.err());
+    }
+
+    @Test
+    void rejectsPostWithEmptyBody() {
+        Result result = run("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "   ");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("--body-json must not be empty"), result.err());
+    }
+
+    @Test
+    void rejectsUnsupportedMethod() {
+        Result result = run("--url", url("/text"), "--expect-status", "200", "--method", "PUT");
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("--method must be GET or POST"), result.err());
+    }
+
+    @Test
+    void cliProcessSendsPostJsonBody() throws Exception {
+        CliResult result = runCli("--url", url("/post-echo"), "--expect-status", "200",
+                "--method", "POST", "--body-json", "{\"name\":\"张三\"}",
+                "--expect-contains", "method=POST;contentType=application/json; charset=utf-8;"
+                        + "contentTypeCount=1;body={\"name\":\"张三\"}");
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.output().contains("PASS expected=200 actual=200"), result.output());
     }
 
     private static CliResult runCli(String... args) throws Exception {
