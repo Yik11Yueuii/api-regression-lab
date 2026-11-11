@@ -2,6 +2,8 @@ package dev.yik.apilab;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ class MainTest {
 
     private HttpServer server;
     private int port;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @TempDir
     Path tempDir;
@@ -1052,6 +1056,223 @@ class MainTest {
         assertTrue(fail.output().contains("SUMMARY total=1 pass=0 fail=1 error=0"), fail.output());
         assertEquals(2, error.exitCode(), error.output());
         assertTrue(error.output().contains("SUMMARY total=1 pass=0 fail=0 error=1"), error.output());
+    }
+
+    @Test
+    void reportRecordsAllPassingCases() throws Exception {
+        Path dir = tempDir.resolve("report-pass");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        JsonNode root = readReport(report);
+        assertEquals(1, root.get("version").asInt());
+        assertTrue(root.get("generatedAt").isTextual(), root.toString());
+        assertEquals(2, root.get("summary").get("total").asInt());
+        assertEquals(2, root.get("summary").get("pass").asInt());
+        assertEquals(0, root.get("summary").get("fail").asInt());
+        assertEquals(0, root.get("summary").get("error").asInt());
+        JsonNode first = root.get("cases").get(0);
+        assertEquals("a.json", first.get("name").asText());
+        assertEquals("PASS", first.get("status").asText());
+        assertEquals(200, first.get("expectedStatus").asInt());
+        assertEquals(200, first.get("actualStatus").asInt());
+        assertTrue(first.get("reasonCode").isNull(), first.toString());
+    }
+
+    @Test
+    void reportRecordsStatusMismatch() throws Exception {
+        Path dir = tempDir.resolve("report-status-fail");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", caseJson(url("/text"), 201, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(1, result.exitCode());
+        JsonNode root = readReport(report);
+        assertEquals(1, root.get("summary").get("pass").asInt());
+        assertEquals(1, root.get("summary").get("fail").asInt());
+        JsonNode failed = root.get("cases").get(1);
+        assertEquals("FAIL", failed.get("status").asText());
+        assertEquals(201, failed.get("expectedStatus").asInt());
+        assertEquals(200, failed.get("actualStatus").asInt());
+        assertEquals("STATUS_MISMATCH", failed.get("reasonCode").asText());
+    }
+
+    @Test
+    void reportRecordsBodyMismatch() throws Exception {
+        Path dir = tempDir.resolve("report-body-fail");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "not-there"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(1, result.exitCode());
+        JsonNode failed = readReport(report).get("cases").get(0);
+        assertEquals("BODY_MISMATCH", failed.get("reasonCode").asText());
+        assertEquals(200, failed.get("actualStatus").asInt());
+    }
+
+    @Test
+    void reportRecordsErrorsWithNullStatuses() throws Exception {
+        Path dir = tempDir.resolve("report-error");
+        writeFile(dir, "a.json", "{\"url\":\"$URL\",\"expectStatus\":200,\"unknownField\":1}"
+                .replace("$URL", url("/text")));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(2, result.exitCode());
+        JsonNode root = readReport(report);
+        assertEquals(1, root.get("summary").get("error").asInt());
+        JsonNode failed = root.get("cases").get(0);
+        assertEquals("ERROR", failed.get("status").asText());
+        assertEquals("INVALID_CASE", failed.get("reasonCode").asText());
+        assertTrue(failed.get("expectedStatus").isNull(), failed.toString());
+        assertTrue(failed.get("actualStatus").isNull(), failed.toString());
+    }
+
+    @Test
+    void reportKeepsCaseOrder() throws Exception {
+        Path dir = tempDir.resolve("report-order");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        writeFile(dir, "b.json", caseJson(url("/text"), 201, "hello world"));
+        writeFile(dir, "c.json", "{\"url\":\"$URL\",\"expectStatus\":200,\"unknownField\":1}"
+                .replace("$URL", url("/text")));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json", "b.json", "c.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(2, result.exitCode());
+        JsonNode cases = readReport(report).get("cases");
+        assertEquals(3, cases.size());
+        assertEquals("a.json", cases.get(0).get("name").asText());
+        assertEquals("b.json", cases.get(1).get("name").asText());
+        assertEquals("c.json", cases.get(2).get("name").asText());
+        assertEquals("PASS", cases.get(0).get("status").asText());
+        assertEquals("FAIL", cases.get(1).get("status").asText());
+        assertEquals("ERROR", cases.get(2).get("status").asText());
+    }
+
+    @Test
+    void reportDoesNotLeakHeadersOrBodies() throws Exception {
+        Path dir = tempDir.resolve("report-leak");
+        writeFile(dir, "leak.json", """
+                {
+                  "url": "$URL",
+                  "method": "POST",
+                  "headers": ["Authorization: Bearer s3cr3t-token"],
+                  "bodyJson": {"password": "s3cr3t-body"},
+                  "expectStatus": 200
+                }
+                """.replace("$URL", url("/post-echo")));
+        Path suite = writeFile(dir, "suite.json", suiteJson("leak.json"));
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(0, result.exitCode(), result.err());
+        String content = Files.readString(report, StandardCharsets.UTF_8);
+        assertFalse(content.contains("s3cr3t"), content);
+        assertFalse(content.contains("Authorization"), content);
+        assertFalse(content.contains("password"), content);
+    }
+
+    @Test
+    void reportWriteFailureReturnsErrorAndLeavesNoFile() throws Exception {
+        Path dir = tempDir.resolve("report-missing-dir");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json"));
+        Path report = dir.resolve("no-such-directory").resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.err().contains("cannot write JSON report"), result.err());
+        assertFalse(Files.exists(report), "report file must not exist");
+    }
+
+    @Test
+    void reportOptionRequiresSuiteAndRejectsDuplicates() {
+        Result alone = run("--report-json", "report.json");
+        Result duplicated = run("--suite", "a.json", "--report-json", "a.json",
+                "--report-json", "b.json");
+        Result withUrl = run("--url", url("/text"), "--expect-status", "200",
+                "--report-json", "report.json");
+
+        assertEquals(2, alone.exitCode());
+        assertTrue(alone.err().contains("--report-json requires --suite"), alone.err());
+        assertEquals(2, duplicated.exitCode());
+        assertTrue(duplicated.err().contains("duplicate option: --report-json"), duplicated.err());
+        assertEquals(2, withUrl.exitCode());
+        assertTrue(withUrl.err().contains("--report-json requires --suite"), withUrl.err());
+    }
+
+    @Test
+    void reportSupportsRelativePath() throws Exception {
+        Path dir = tempDir.resolve("report-relative");
+        writeFile(dir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        Path suite = writeFile(dir, "suite.json", suiteJson("a.json"));
+        Path relative = Path.of("target", "report-relative-" + System.nanoTime() + ".json");
+
+        try {
+            Result result = run("--suite", suite.toString(), "--report-json", relative.toString());
+
+            assertEquals(0, result.exitCode(), result.err());
+            assertTrue(Files.exists(relative), "report must be created relative to the working directory");
+            assertEquals(1, readReport(relative).get("summary").get("pass").asInt());
+        } finally {
+            Files.deleteIfExists(relative);
+        }
+    }
+
+    @Test
+    void caseNamesWithControlCharactersAreSanitized() throws Exception {
+        Path dir = tempDir.resolve("report-control");
+        Path suite = writeFile(dir, "suite.json", "{\"cases\":[\"bad\\u0001name.json\"]}");
+
+        Result result = run("--suite", suite.toString());
+
+        assertEquals(2, result.exitCode());
+        assertTrue(result.out().contains("CASE bad?name.json"), result.out());
+        assertEquals(1, result.out().lines()
+                .filter(line -> line.startsWith("CASE")).count());
+        assertFalse(result.out().contains("\u0001"), "stdout must not contain raw control characters");
+        assertFalse(result.err().contains("\u0001"), "stderr must not contain raw control characters");
+    }
+
+    @Test
+    void reportModeSubprocessReturnsRealExitCodes() throws Exception {
+        Path passDir = tempDir.resolve("report-proc-pass");
+        writeFile(passDir, "a.json", caseJson(url("/text"), 200, "hello world"));
+        Path passSuite = writeFile(passDir, "suite.json", suiteJson("a.json"));
+        Path passReport = passDir.resolve("report.json");
+
+        Path failDir = tempDir.resolve("report-proc-fail");
+        writeFile(failDir, "a.json", caseJson(url("/text"), 201, "hello world"));
+        Path failSuite = writeFile(failDir, "suite.json", suiteJson("a.json"));
+        Path failReport = failDir.resolve("report.json");
+
+        CliResult pass = runCli("--suite", passSuite.toString(), "--report-json", passReport.toString());
+        CliResult fail = runCli("--suite", failSuite.toString(), "--report-json", failReport.toString());
+
+        assertEquals(0, pass.exitCode(), pass.output());
+        assertEquals(1, readReport(passReport).get("summary").get("pass").asInt());
+        assertEquals(1, fail.exitCode(), fail.output());
+        assertEquals(1, readReport(failReport).get("summary").get("fail").asInt());
+    }
+
+    private static JsonNode readReport(Path report) throws IOException {
+        return JSON.readTree(Files.readString(report, StandardCharsets.UTF_8));
     }
 
     private Path writeFile(Path dir, String name, String content) throws IOException {
