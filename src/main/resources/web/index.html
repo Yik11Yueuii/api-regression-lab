@@ -358,6 +358,17 @@
     font-size: 12px;
   }
 
+  .soft-alert {
+    margin: 10px 0 0;
+    padding: 9px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
   .stack { display: flex; flex-direction: column; gap: 14px; }
 
   .field label {
@@ -966,6 +977,7 @@
               <input id="expect-contains" type="text" placeholder="例如：多云（留空则不校验）">
             </div>
           </div>
+          <div class="soft-alert" id="assertion-alert" hidden></div>
           <p class="field-error" id="error-status"></p>
           <p class="panel-note">两项断言都会校验：状态码必须一致，填写文本时必须出现在响应中。</p>
         </div>
@@ -1121,6 +1133,9 @@
   var panels = Array.prototype.slice.call(document.querySelectorAll(".tab-panel[role=tabpanel]"));
   var running = false;
   var singleResultPayload = null;
+  var singleResultMeta = null; // { expectedStatus, actualStatus, responseBody, responseBytes, responseTruncated, status }
+  var singleResultFormHash = null; // snapshot of the form at send time — changes → result stale
+  var lastSentUrl = null;
   var activeWorkspace = "single";
   var caseEditorOpen = false;
 
@@ -1398,6 +1413,9 @@
     if (!payload) return;
 
     singleResultPayload = JSON.parse(JSON.stringify(payload));
+    singleResultFormHash = formSnapshot();
+    lastSentUrl = normalizeUrl(payload.url);
+    setAssertionAlert("");
     g("single-add-case").disabled = true;
     setLoading(true);
     try {
@@ -1413,6 +1431,16 @@
         throw new Error("本地测试服务返回了无法解析的响应");
       }
       showResult(data);
+      singleResultMeta = {
+        expectedStatus: data.expectedStatus,
+        actualStatus: data.actualStatus,
+        responseBody: data.responseBody,
+        responseBytes: data.responseBytes,
+        responseTruncated: Boolean(data.responseTruncated),
+        status: data.status,
+        reasonCode: data.reasonCode
+      };
+      g("single-add-case").disabled = false;
     } catch (e) {
       showResult({
         status: "ERROR",
@@ -1425,6 +1453,8 @@
         responseTruncated: false,
         responseBytes: 0
       });
+      // 请求未完成，不应生成任何断言基线。
+      invalidateSingleResult();
     } finally {
       setLoading(false);
     }
@@ -1456,10 +1486,41 @@
     }
   }
 
+  function singleFormChangedSinceSend() {
+    if (!singleResultFormHash) return false;
+    return formSnapshot() !== singleResultFormHash;
+  }
+
+  function clearSingleResultIfStale() {
+    if (singleResultPayload && singleFormChangedSinceSend()) {
+      invalidateSingleResult();
+    }
+  }
+
+  function checkUrlSwitch() {
+    if (caseEditorOpen) return; // 共享表单在批量编辑器里，不动
+    var url = normalizeUrl(el.url.value);
+    if (!lastSentUrl) return;
+    if (url !== lastSentUrl && el.expectContains.value.trim()) {
+      // URL 变了，清掉上一个接口的 expectContains 避免污染；
+      // 不清 expectStatus——200 对大多数接口都合理，不影响状态码校验。
+      el.expectContains.value = "";
+      setAssertionAlert("已切换到不同接口，上一个接口的响应包含断言已清空。当前仅验证 HTTP 状态码；请在响应预览中确认后再填写合适的包含文本。");
+      activateTab("assertions", false);
+    }
+  }
+
   el.form.addEventListener("submit", submitTest);
   el.method.addEventListener("change", syncMethod);
+  el.url.addEventListener("blur", function () {
+    setError("error-url", "");
+    if (caseEditorOpen && !caseNameTouched) g("edit-name").value = suggestName(el.url.value.trim());
+    checkUrlSwitch();
+  });
   el.url.addEventListener("input", function () {
     setError("error-url", "");
+    // URL 字段变动：上一次发出去的请求对应的结果快照不再可靠。
+    clearSingleResultIfStale();
     if (caseEditorOpen && !caseNameTouched) g("edit-name").value = suggestName(el.url.value.trim());
   });
   el.expectStatus.addEventListener("input", function () {
@@ -1468,6 +1529,14 @@
   });
   el.expectContains.addEventListener("input", updateAssertionReview);
   el.body.addEventListener("input", function () { setError("error-body", ""); });
+
+  // 表单任何字段变动都让单次结果快照失效，避免用过期配置的响应创建错误的回归用例。
+  el.method.addEventListener("change", clearSingleResultIfStale);
+  el.expectStatus.addEventListener("input", clearSingleResultIfStale);
+  el.expectContains.addEventListener("input", clearSingleResultIfStale);
+  el.body.addEventListener("input", clearSingleResultIfStale);
+  el.params.addEventListener("input", clearSingleResultIfStale);
+  el.headers.addEventListener("input", clearSingleResultIfStale);
   document.getElementById("load-example").addEventListener("click", function () {
     loadExample(true);
   });
@@ -1553,6 +1622,73 @@
   var caseNameTouched = false;
 
   function g(id) { return document.getElementById(id); }
+
+  function normalizeUrl(url) {
+    try { return new URL(url.trim()).href; } catch (e) { return url.trim(); }
+  }
+
+  function formSnapshot() {
+    try {
+      return JSON.stringify({
+        method: el.method.value,
+        url: normalizeUrl(el.url.value),
+        body: el.body.value,
+        expectStatus: el.expectStatus.value,
+        expectContains: el.expectContains.value,
+        params: el.params.querySelectorAll(".pair").length,
+        headers: el.headers.querySelectorAll(".pair").length,
+        paramValues: Array.prototype.slice.call(el.params.querySelectorAll(".pair")).map(function (r) {
+          return r.querySelector(".pair-name").value + "=" + r.querySelector(".pair-value").value;
+        }),
+        headerValues: Array.prototype.slice.call(el.headers.querySelectorAll(".pair")).map(function (r) {
+          return r.querySelector(".pair-name").value + ":" + r.querySelector(".pair-value").value;
+        })
+      });
+    } catch (e) { return null; }
+  }
+
+  function invalidateSingleResult() {
+    singleResultPayload = null;
+    singleResultMeta = null;
+    singleResultFormHash = null;
+    g("single-add-case").disabled = true;
+  }
+
+  function setAssertionAlert(message) {
+    var box = g("assertion-alert");
+    if (!message) { box.hidden = true; box.textContent = ""; return; }
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function responseSuggestionText(meta) {
+    if (!meta || !meta.responseBody || meta.responseTruncated) return null;
+    var trimmed = meta.responseBody.trim();
+    if (!trimmed) return null;
+    if (meta.responseBytes > 2048) return null; // 2 KB 以上不建议全文
+    // JSON 对象或数组不建议整段，避免把大对象塞进断言
+    if ((trimmed.charAt(0) === "{" || trimmed.charAt(0) === "[") && trimmed.length > 120) return null;
+    // 单行短 JSON 也不建议；用户看得到响应，自行决定
+    if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "[") return null;
+    // 太长也不建议
+    if (trimmed.length > 120) return null;
+    return trimmed;
+  }
+
+  function responseSuggestionNote(meta) {
+    if (!meta) return "";
+    if (meta.status !== "PASS" && meta.status !== "FAIL") return "";
+    if (!meta.responseBody) return "";
+    if (meta.responseTruncated) return "本次响应较大且已截断，不自动建议包含文本基线。";
+    if (meta.responseBytes > 2048) return "本次响应超过 2 KB，不自动建议包含文本基线，请根据业务自行填写。";
+    var trimmed = meta.responseBody.trim();
+    if (!trimmed) return "本次响应体为空，只能验证 HTTP 状态码。";
+    if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "[") {
+      return "本次响应是 JSON 结构，不自动复制整段内容作为断言。建议根据字段语义手动填写，或只验证状态码。";
+    }
+    if (trimmed.length > 120) return "本次响应较长，不自动建议全文包含断言，请根据业务自行填写。";
+    return "";
+  }
 
   function newCaseId() { return nextCaseId++; }
 
@@ -1721,6 +1857,19 @@
     updateBatchSummary();
   }
 
+  function caseStatusLabel(c) {
+    if (!c.status) return "—";
+    if (c.status === "PASS") {
+      return c.expectContains ? "PASS" : "PASS·仅状态码";
+    }
+    if (c.status === "FAIL") {
+      if (c.reasonCode === "STATUS_MISMATCH") return "FAIL·状态码";
+      if (c.reasonCode === "BODY_MISMATCH") return "FAIL·响应内容";
+      return "FAIL";
+    }
+    return "ERROR";
+  }
+
   function friendlyResult(c) {
     var actual = c.actualStatus == null ? "—" : c.actualStatus;
     if (c.status === "PASS") {
@@ -1800,7 +1949,7 @@
 
       var status = document.createElement("span");
       status.className = "case-status " + (c.status ? c.status.toLowerCase() : "empty");
-      status.textContent = c.status || "—";
+      status.textContent = caseStatusLabel(c);
 
       var ctrls = document.createElement("div");
       ctrls.className = "case-controls";
@@ -2081,9 +2230,42 @@
   function addFromSingleResult() {
     if (batchRunning) { alert("批量测试正在执行，请等本次运行完成后再从单接口结果创建用例。"); return; }
     if (!singleResultPayload || caseEditorOpen) return;
-    if (!confirm("使用本次结果对应的请求配置创建批量用例吗？\n\n下一步会显示完整请求和当前断言，确认保存后才会加入测试集。")) return;
+    if (singleFormChangedSinceSend()) {
+      alert("当前请求配置已与产生本次响应时不同。\n\n请重新发送请求，再将新的响应保存为回归基线。");
+      return;
+    }
+    if (!singleResultMeta || singleResultMeta.status === "ERROR") {
+      alert("本次请求未能完成，不能作为回归基线保存。");
+      return;
+    }
+
+    // 实际状态码作为预期状态码建议——让回归测试锁死本次真实响应。
+    var payload = JSON.parse(JSON.stringify(singleResultPayload));
+    if (singleResultMeta.actualStatus != null) payload.expectStatus = singleResultMeta.actualStatus;
+
+    // 条件性建议响应包含文本。只在短非 JSON 非截断场景自动填入，
+    // 否则清空——让用户自己决定是否要验证响应内容。
+    var suggestion = responseSuggestionText(singleResultMeta);
+    var note = responseSuggestionNote(singleResultMeta);
+    if (suggestion) {
+      payload.expectContains = suggestion;
+    } else {
+      delete payload.expectContains;
+    }
+
+    var summary = "本次真实响应：";
+    summary += "\n· HTTP 状态码 " + singleResultMeta.actualStatus + " → 建议预期 " + payload.expectStatus;
+    if (suggestion) {
+      summary += "\n· 响应包含文本建议填：『" + (suggestion.length > 40 ? suggestion.slice(0, 40) + "…" : suggestion) + "』";
+    } else {
+      summary += "\n· 不自动建议响应包含文本（" + (note || "请根据业务自行填写") + "）";
+    }
+    summary += "\n\n请确认以上状态码和包含文本符合业务预期，再保存为回归基线。";
+
+    if (!confirm("将从本次响应创建回归用例。\n\n" + summary)) return;
+
     switchWorkspace("batch");
-    openCaseEditor(-1, JSON.parse(JSON.stringify(singleResultPayload)), "single");
+    openCaseEditor(-1, payload, "single");
   }
 
   function moveCase(i, delta) {

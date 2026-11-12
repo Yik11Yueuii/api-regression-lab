@@ -112,6 +112,14 @@ class WebServerTest {
         assertTrue(response.body().contains("htmlReportExplanation(c)")
                         && !response.body().contains("c.friendlyMessage"),
                 "HTML report explanation must not echo friendlyMessage (which may contain raw expectContains)");
+        assertTrue(response.body().contains("function responseSuggestionText(meta)"),
+                "V2-03.1 must conditionally suggest response text as assertion baseline");
+        assertTrue(response.body().contains("function clearSingleResultIfStale()"),
+                "V2-03.1 must invalidate result snapshot when form changes");
+        assertTrue(response.body().contains("function checkUrlSwitch()"),
+                "V2-03.1 must detect URL switches and avoid assertion pollution");
+        assertTrue(response.body().contains("function caseStatusLabel(c)"),
+                "V2-03.1 must distinguish PASS·仅状态码 from PASS");
     }
 
     @Test
