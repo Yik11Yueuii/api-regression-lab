@@ -3,6 +3,8 @@ package dev.yik.apilab;
 import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -11,9 +13,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -49,13 +55,13 @@ public final class Main {
 
     static int execute(String[] args, PrintStream out, PrintStream err) {
         try {
-            String suitePath = suitePathFrom(args);
-            if (suitePath != null) {
-                return runSuite(Path.of(suitePath), out, err);
+            SuiteCommand suite = suiteCommandFrom(args);
+            if (suite != null) {
+                return runSuite(suite, out, err);
             }
-            return runCase(Options.load(args), newClient(), out, err);
+            return runCase(Options.load(args), newClient(), out, err).exitCode();
         } catch (IllegalArgumentException e) {
-            err.println("ERROR " + e.getMessage());
+            err.println("ERROR " + printable(e.getMessage()));
             return EXIT_ERROR;
         }
     }
@@ -67,60 +73,90 @@ public final class Main {
     }
 
     /**
-     * Returns the suite file path when {@code --suite} is used and null otherwise. Suite mode is
-     * mutually exclusive with the single case modes so a run never mixes both.
+     * Parses {@code --suite} and its optional {@code --report-json} companion. Returns null when
+     * neither option is present (single case mode). Suite mode accepts no other options so a run
+     * never mixes modes.
      */
-    private static String suitePathFrom(String[] args) {
-        int count = 0;
-        int index = -1;
-        for (int i = 0; i < args.length; i++) {
-            if (args[i].equals("--suite")) {
-                count++;
-                index = i;
+    private static SuiteCommand suiteCommandFrom(String[] args) {
+        boolean hasSuite = false;
+        boolean hasReport = false;
+        for (String argument : args) {
+            if (argument.equals("--suite")) {
+                hasSuite = true;
+            } else if (argument.equals("--report-json")) {
+                hasReport = true;
             }
         }
-        if (count == 0) {
+        if (!hasSuite && !hasReport) {
             return null;
         }
-        if (count > 1) {
-            throw new IllegalArgumentException("duplicate option: --suite");
+        if (!hasSuite) {
+            throw new IllegalArgumentException("--report-json requires --suite");
         }
-        if (args.length == 1) {
-            throw new IllegalArgumentException("missing value for --suite");
+        String suitePath = null;
+        String reportPath = null;
+        for (int i = 0; i < args.length; i++) {
+            String argument = args[i];
+            if (argument.equals("--suite")) {
+                if (suitePath != null) {
+                    throw new IllegalArgumentException("duplicate option: --suite");
+                }
+                suitePath = Options.valueOf(args, ++i, "--suite");
+            } else if (argument.equals("--report-json")) {
+                if (reportPath != null) {
+                    throw new IllegalArgumentException("duplicate option: --report-json");
+                }
+                reportPath = Options.valueOf(args, ++i, "--report-json");
+            } else {
+                throw new IllegalArgumentException(
+                        "--suite cannot be combined with other options: " + argument);
+            }
         }
-        if (args.length != 2 || index != 0) {
-            throw new IllegalArgumentException("--suite cannot be combined with other options");
-        }
-        return args[1];
+        return new SuiteCommand(Path.of(suitePath),
+                reportPath == null ? null : Path.of(reportPath));
     }
 
     /**
      * Runs every case of a suite in declaration order, keeps going after FAIL or ERROR, and prints
      * one line per case plus the final summary. ERROR dominates FAIL in the exit code.
      */
-    private static int runSuite(Path suiteFile, PrintStream out, PrintStream err) {
-        List<SuiteCase> cases = SuiteCase.load(suiteFile);
+    private static int runSuite(SuiteCommand command, PrintStream out, PrintStream err) {
+        List<SuiteCase> cases = SuiteCase.load(command.suite());
         HttpClient client = newClient();
+        List<CaseResult> results = new ArrayList<>();
+        for (SuiteCase suiteCase : cases) {
+            out.println("CASE " + suiteCase.displayName());
+            CaseResult result;
+            if (suiteCase.path() == null) {
+                err.println("ERROR invalid case path");
+                result = CaseResult.error(suiteCase.displayName(), null, "INVALID_CASE");
+                results.add(result);
+                continue;
+            }
+            try {
+                result = runCase(Options.fromFile(suiteCase.path()), client, out, err)
+                        .named(suiteCase.displayName());
+            } catch (IllegalArgumentException e) {
+                err.println("ERROR " + printable(e.getMessage()));
+                result = CaseResult.error(suiteCase.displayName(), null, "INVALID_CASE");
+            }
+            results.add(result);
+        }
         int pass = 0;
         int fail = 0;
         int error = 0;
-        for (SuiteCase suiteCase : cases) {
-            out.println("CASE " + suiteCase.label());
-            int code;
-            try {
-                code = runCase(Options.fromFile(suiteCase.path()), client, out, err);
-            } catch (IllegalArgumentException e) {
-                err.println("ERROR " + e.getMessage());
-                code = EXIT_ERROR;
-            }
-            switch (code) {
-                case EXIT_PASS -> pass++;
-                case EXIT_FAIL -> fail++;
+        for (CaseResult result : results) {
+            switch (result.status()) {
+                case "PASS" -> pass++;
+                case "FAIL" -> fail++;
                 default -> error++;
             }
         }
         out.printf("SUMMARY total=%d pass=%d fail=%d error=%d%n",
-                cases.size(), pass, fail, error);
+                results.size(), pass, fail, error);
+        if (command.report() != null) {
+            writeReport(command.report(), results);
+        }
         if (error > 0) {
             return EXIT_ERROR;
         }
@@ -130,8 +166,9 @@ public final class Main {
         return EXIT_PASS;
     }
 
-    private static int runCase(Options options, HttpClient client,
-                               PrintStream out, PrintStream err) {
+    private static CaseResult runCase(Options options, HttpClient client,
+                                      PrintStream out, PrintStream err) {
+        int expectedStatus = options.expectedStatus();
         try {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(options.requestUri())
                     .timeout(Duration.ofSeconds(30));
@@ -156,31 +193,123 @@ public final class Main {
             int actualStatus = response.statusCode();
             String body = response.body();
 
-            boolean statusMatches = actualStatus == options.expectedStatus();
+            boolean statusMatches = actualStatus == expectedStatus;
             boolean bodyMatches = options.expectedContains() == null
                     || body.contains(options.expectedContains());
 
             if (statusMatches && bodyMatches) {
-                out.printf("PASS expected=%d actual=%d%n", options.expectedStatus(), actualStatus);
-                return EXIT_PASS;
+                out.printf("PASS expected=%d actual=%d%n", expectedStatus, actualStatus);
+                return new CaseResult(null, "PASS", expectedStatus, actualStatus, null);
             }
-            out.printf("FAIL expected=%d actual=%d%n", options.expectedStatus(), actualStatus);
+            out.printf("FAIL expected=%d actual=%d%n", expectedStatus, actualStatus);
             if (!bodyMatches) {
                 out.printf("reason: response body does not contain expected text: %s%n",
-                        options.expectedContains());
+                        printable(options.expectedContains()));
             }
-            return EXIT_FAIL;
+            String reasonCode = statusMatches ? "BODY_MISMATCH" : "STATUS_MISMATCH";
+            return new CaseResult(null, "FAIL", expectedStatus, actualStatus, reasonCode);
         } catch (IllegalArgumentException e) {
-            err.println("ERROR " + e.getMessage());
-            return EXIT_ERROR;
+            err.println("ERROR " + printable(e.getMessage()));
+            return CaseResult.error(null, expectedStatus, "INVALID_REQUEST");
         } catch (IOException e) {
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            err.println("ERROR request failed: " + reason);
-            return EXIT_ERROR;
+            err.println("ERROR request failed: " + printable(reason));
+            return CaseResult.error(null, expectedStatus, "REQUEST_FAILED");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             err.println("ERROR request interrupted");
-            return EXIT_ERROR;
+            return CaseResult.error(null, expectedStatus, "INTERRUPTED");
+        }
+    }
+
+    /** Replaces control characters so a case name cannot break the console layout. */
+    private static String printable(String value) {
+        StringBuilder sanitized = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            sanitized.append(c < 0x20 || c == 0x7F ? '?' : c);
+        }
+        return sanitized.toString();
+    }
+
+    /**
+     * Writes the JSON report through a temporary file in the target directory, then moves it into
+     * place, so a failed write never leaves a partially written report. The move is atomic where
+     * the file system supports it and degrades to a plain replace move otherwise (the temporary
+     * file is already complete at that point). Failure to write is reported as ERROR/2 by the
+     * caller.
+     */
+    private static void writeReport(Path reportPath, List<CaseResult> results) {
+        Path target = reportPath.toAbsolutePath();
+        Path parent = target.getParent();
+        if (parent == null) {
+            throw new IllegalArgumentException("cannot write JSON report: " + target);
+        }
+
+        ArrayNode caseNodes = JSON.createArrayNode();
+        int pass = 0;
+        int fail = 0;
+        int error = 0;
+        for (CaseResult result : results) {
+            switch (result.status()) {
+                case "PASS" -> pass++;
+                case "FAIL" -> fail++;
+                default -> error++;
+            }
+            ObjectNode node = caseNodes.addObject();
+            node.put("name", result.name());
+            node.put("status", result.status());
+            if (result.expectedStatus() == null) {
+                node.putNull("expectedStatus");
+            } else {
+                node.put("expectedStatus", result.expectedStatus());
+            }
+            if (result.actualStatus() == null) {
+                node.putNull("actualStatus");
+            } else {
+                node.put("actualStatus", result.actualStatus());
+            }
+            if (result.reasonCode() == null) {
+                node.putNull("reasonCode");
+            } else {
+                node.put("reasonCode", result.reasonCode());
+            }
+        }
+
+        ObjectNode root = JSON.createObjectNode();
+        root.put("version", 1);
+        root.put("generatedAt", Instant.now().toString());
+        ObjectNode summary = root.putObject("summary");
+        summary.put("total", results.size());
+        summary.put("pass", pass);
+        summary.put("fail", fail);
+        summary.put("error", error);
+        root.set("cases", caseNodes);
+
+        Path temp = null;
+        try {
+            temp = Files.createTempFile(parent, "apilab-report-", ".tmp");
+            Files.writeString(temp,
+                    JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root)
+                            + System.lineSeparator(),
+                    StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            temp = null;
+        } catch (IOException e) {
+            throw new IllegalArgumentException("cannot write JSON report: " + target);
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // best effort cleanup of the temporary file
+                }
+            }
         }
     }
 
@@ -211,7 +340,30 @@ public final class Main {
         return root;
     }
 
-    private record SuiteCase(String label, Path path) {
+    private record SuiteCommand(Path suite, Path report) {
+    }
+
+    private record CaseResult(String name, String status, Integer expectedStatus,
+                              Integer actualStatus, String reasonCode) {
+
+        static CaseResult error(String name, Integer expectedStatus, String reasonCode) {
+            return new CaseResult(name, "ERROR", expectedStatus, null, reasonCode);
+        }
+
+        CaseResult named(String caseName) {
+            return new CaseResult(caseName, status, expectedStatus, actualStatus, reasonCode);
+        }
+
+        int exitCode() {
+            return switch (status) {
+                case "PASS" -> EXIT_PASS;
+                case "FAIL" -> EXIT_FAIL;
+                default -> EXIT_ERROR;
+            };
+        }
+    }
+
+    private record SuiteCase(String displayName, Path path) {
 
         /**
          * Loads the suite manifest. Relative entries are resolved against the suite file directory,
@@ -244,9 +396,44 @@ public final class Main {
                 if (entry.isBlank()) {
                     throw new IllegalArgumentException("field 'cases' must not contain empty entries");
                 }
-                cases.add(new SuiteCase(entry, base.resolve(entry).normalize()));
+                cases.add(new SuiteCase(displayName(entry), resolveCasePath(base, entry)));
             }
             return List.copyOf(cases);
+        }
+
+        /**
+         * Builds the name shared by the console output and the JSON report. An absolute entry is
+         * reduced to its file name so local directory layout never leaks into logs or reports;
+         * control characters are replaced so one entry cannot break the output format. Reading the
+         * case file still uses the original entry.
+         */
+        private static String displayName(String entry) {
+            String name = entry;
+            try {
+                Path raw = Path.of(entry);
+                if (raw.isAbsolute() && raw.getFileName() != null) {
+                    name = raw.getFileName().toString();
+                }
+            } catch (InvalidPathException e) {
+                int separator = Math.max(entry.lastIndexOf('/'), entry.lastIndexOf('\\'));
+                if (separator >= 0) {
+                    name = entry.substring(separator + 1);
+                }
+            }
+            return printable(name);
+        }
+
+        /**
+         * Returns null when the entry cannot be turned into a path (for example because it
+         * contains control characters); the caller reports such an entry as a single ERROR case
+         * instead of aborting the whole suite.
+         */
+        private static Path resolveCasePath(Path base, String entry) {
+            try {
+                return base.resolve(entry).normalize();
+            } catch (InvalidPathException e) {
+                return null;
+            }
         }
     }
 
@@ -310,7 +497,8 @@ public final class Main {
                                 + " [--method GET|POST] [--body-json <json>]"
                                 + " [--expect-contains <text>]"
                                 + " [--header \"Name: Value\"]... [--query \"name=value\"]..."
-                                + " | --file <test-case.json>");
+                                + " | --file <test-case.json>"
+                                + " | --suite <suite.json> [--report-json <report.json>]");
             }
             return of(url, method, bodyJson, expectedStatus, expectedContains, headers, queries);
         }

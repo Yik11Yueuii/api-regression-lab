@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Test and package
+        run: mvn -B clean package
+
+      - name: Verify executable jar
+        run: |
+          test -f target/api-regression-lab-0.1.0.jar
+          unzip -l target/api-regression-lab-0.1.0.jar | grep -q 'dev/yik/apilab/Main.class'
+          unzip -l target/api-regression-lab-0.1.0.jar | grep -q 'com/fasterxml/jackson/databind/ObjectMapper.class'
+          set +e
+          java -jar target/api-regression-lab-0.1.0.jar --url http://127.0.0.1:1/unreachable --expect-status 200
+          code=$?
+          set -e
+          echo "unreachable target exit code: $code"
+          test "$code" -eq 2
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-regression-lab-jar
+          path: target/api-regression-lab-0.1.0.jar
+          retention-days: 7

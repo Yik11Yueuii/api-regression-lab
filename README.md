@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本（V1-03）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例并输出汇总。
+一个轻量级 Java API 回归测试工具。当前版本（V1-04）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。
 
 ## 环境要求
 
@@ -45,6 +45,8 @@ mvn -v
 
 ```bash
 java -jar target/api-regression-lab-0.1.0.jar --url <URL> --expect-status <状态码> [--method GET|POST] [--body-json <JSON字符串>] [--expect-contains <文本>] [--header "名称: 值"]... [--query "名称=值"]...
+java -jar target/api-regression-lab-0.1.0.jar --file <用例文件.json>
+java -jar target/api-regression-lab-0.1.0.jar --suite <suite.json> [--report-json <报告文件.json>]
 ```
 
 示例（目标服务必须实际启动后才能访问）：
@@ -169,13 +171,14 @@ java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json
 规则：
 
 - `cases` 必填，必须是非空字符串数组；未知字段、空数组、非字符串条目都会报 `ERROR`
-- 清单与 `--file`、`--url` 等参数互斥，`--suite` 不可重复
+- 清单与 `--file`、`--url` 等参数互斥，`--suite` 不可重复；唯一允许的组合是 suite 模式的可选参数 `--report-json`（见下文）
 - 相对路径以 suite 文件所在目录为基准，与当前工作目录无关；绝对路径同样支持（Windows 路径中的反斜杠需写成 `\\`，或改用 `/`）
 - 按数组顺序逐个执行，单个用例 FAIL 或 ERROR 后继续执行剩余用例
-- 每个用例打印一行 `CASE <名称>`，随后是该项的 PASS / FAIL / ERROR 输出
+- 每个用例打印一行 `CASE <名称>`，随后是该项的 PASS / FAIL / ERROR 输出；名称为条目原文（绝对路径条目只显示文件名），其中的换行、制表符等控制字符会被替换为 `?`，避免破坏日志格式
 - 最后打印汇总：`SUMMARY total=N pass=N fail=N error=N`
 - 退出码：全部 PASS 为 0；至少一个 FAIL 且没有 ERROR 为 1；至少一个 ERROR 为 2
 - 清单无法读取、JSON 非法、`cases` 为空或类型错误时直接 `ERROR` 并以退出码 2 结束
+- 无法构成本地路径的条目（例如包含控制字符）只会让该项记为 ERROR，不会中断整个 suite
 - 不支持嵌套 suite，条目必须指向 V1-02 格式的单用例文件
 
 输出与退出码：
@@ -210,6 +213,97 @@ java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/missi
 java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --header "NoColonHere"
 ```
 
+## JSON 测试报告
+
+在 suite 模式下追加 `--report-json <输出文件路径>`，执行完成后生成一份 JSON 报告：
+
+```bash
+java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json --report-json reports/result.json
+```
+
+Windows 路径分隔符可写成 `\\` 或直接用 `/`。
+
+规则：
+
+- `--report-json` 只能与 `--suite` 一起使用，不能单独使用，也不能在单个 `--url` / `--file` 模式下使用
+- 两个参数都不可重复；出现重复或与其他参数混用时输出 `ERROR` 并以退出码 2 结束
+- 不提供 `--report-json` 时，suite 的行为与之前完全一致（只输出控制台结果）
+- 输出路径支持相对路径与绝对路径；相对路径以**当前工作目录**为基准（注意：与 suite 中用例路径以 suite 文件目录为基准的规则不同）
+- 目标文件的**父目录必须已存在**，工具不会自动创建目录
+- 报告先写入同目录下的临时文件，再移动到目标路径：文件系统支持原子移动时使用原子替换；不支持时退回一次普通替换移动（此时临时文件已完整写入并关闭）。无论哪种方式，写入失败都不会留下不完整的最终报告，也不会残留临时文件
+- 报告写入失败（目录不存在、无写权限等）会在控制台输出 `ERROR cannot write JSON report: <路径>`，进程以退出码 2 结束，不会假装执行成功
+- 报告只包含用例名称、状态、状态码与原因代码，不保存请求头值（如 `Authorization`、`Cookie`）、请求体或任何响应体
+
+报告格式（`version` 固定为 1，便于其他程序稳定读取）：
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-11-11T09:34:35.369123600Z",
+  "summary": {
+    "total": 2,
+    "pass": 2,
+    "fail": 0,
+    "error": 0
+  },
+  "cases": [
+    {
+      "name": "weather-get.json",
+      "status": "PASS",
+      "expectedStatus": 200,
+      "actualStatus": 200,
+      "reasonCode": null
+    },
+    {
+      "name": "user-create-post.json",
+      "status": "PASS",
+      "expectedStatus": 201,
+      "actualStatus": 201,
+      "reasonCode": null
+    }
+  ]
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `version` | 整数 | 报告格式版本，当前为 `1` |
+| `generatedAt` | 字符串 | 报告生成时间，UTC ISO-8601 格式 |
+| `summary.total` | 整数 | 用例总数 |
+| `summary.pass` / `fail` / `error` | 整数 | 各状态数量，三者之和等于 `total` |
+| `cases[].name` | 字符串 | 用例展示名称，与 `CASE` 输出完全一致；绝对路径条目只显示文件名，控制字符替换为 `?` |
+| `cases[].status` | 字符串 | `PASS`、`FAIL` 或 `ERROR` |
+| `cases[].expectedStatus` | 整数或 null | 用例声明的期望状态码；用例文件无法读取或解析时为 `null` |
+| `cases[].actualStatus` | 整数或 null | 实际收到的 HTTP 状态码；未取得响应（参数错误、连接失败等）时为 `null` |
+| `cases[].reasonCode` | 字符串或 null | PASS 时为 `null`，否则为下表中的原因代码 |
+
+原因代码：
+
+| 原因代码 | 含义 |
+| --- | --- |
+| `STATUS_MISMATCH` | 实际状态码与 `expectStatus` 不一致 |
+| `BODY_MISMATCH` | 状态码匹配，但响应体不包含 `expectContains` 文本 |
+| `INVALID_CASE` | 用例文件缺失、无法读取，或内容不符合单用例文件规则 |
+| `INVALID_REQUEST` | 构建请求失败（例如请求头被 JDK HttpClient 拒绝） |
+| `REQUEST_FAILED` | 网络层失败（连接被拒绝、超时等），未取得响应 |
+| `INTERRUPTED` | 请求被中断 |
+
+报告中的 `cases` 顺序与 suite 清单顺序一致，便于与控制台输出逐项对照。退出码规则与不生成报告时相同（0 / 1 / 2）。
+
+## 持续集成（GitHub Actions）
+
+仓库内置 [.github/workflows/ci.yml](.github/workflows/ci.yml)：
+
+- 在 `main` 分支 push 以及所有 Pull Request 上自动运行
+- 使用 Ubuntu 与 Java 21（Temurin），并通过 `actions/setup-java` 缓存 Maven 依赖
+- 执行 `mvn -B clean package`，即完整的编译、单元测试与打包
+- 额外校验可执行 JAR：确认 `dev/yik/apilab/Main.class` 与 Jackson 类已打入 JAR，并用一个不可达地址运行 JAR，确认退出码为 2
+- 上传构建产物 JAR 作为 workflow artifact
+- 所有自动化测试都使用本机启动的模拟 HTTP 服务，不访问公司接口或外部测试 API，也不需要配置任何 GitHub Secrets
+- 不会自动创建 Release，也不会自动合并 PR
+
 ## 运行测试
 
 ```bash
@@ -236,13 +330,16 @@ mvn clean test
 - 以子进程启动 CLI 的集成测试，覆盖真实进程退出码 0 / 1 / 2
 - `--file` 从本地 JSON 文件读取单个测试用例，字段类型、必填项与未知字段均做严格校验
 - `--suite` 按清单顺序批量执行多个用例，逐项输出结果并打印 `SUMMARY` 汇总，支持相对/绝对路径与 UTF-8 BOM
+- `--report-json` 在 suite 模式下生成 JSON 测试报告（临时文件 + 原子替换，不支持原子移动时退回普通替换；不包含请求头值/请求体/响应体）
+- 控制台 `CASE` 名称与错误信息中的控制字符会被替换，避免破坏日志格式
 - Maven Shade Plugin 打包可自包含运行的 JAR（包含 Jackson）
+- GitHub Actions CI（Ubuntu + Java 21）自动执行测试、打包与 JAR 校验
 
 ## 尚未实现功能
 
 - PUT、DELETE 等其他 HTTP 方法
 - JSON 语法校验与 JSON 字段级断言
 - 并发执行、失败重试与用例间变量关联
-- JSON / HTML 测试报告
+- HTML 测试报告
 - 历史测试结果比较
 - Web GUI
