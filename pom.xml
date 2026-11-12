@@ -6,7 +6,7 @@
 
     <groupId>dev.yik</groupId>
     <artifactId>api-regression-lab</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <name>api-regression-lab</name>
     <description>A lightweight CLI for API regression checks.</description>
 
