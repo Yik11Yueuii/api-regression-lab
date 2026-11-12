@@ -997,6 +997,10 @@
 
     <div class="empty-state" id="response-empty">发送请求后，这里会显示断言结果与实际响应内容。</div>
 
+    <div class="soft-alert result-stale-banner" id="result-stale-banner" hidden>
+      当前表单在响应返回后已被修改，以上结果不再对应当前配置；请勿用它创建回归基线。重新发送请求可刷新。
+    </div>
+
     <div class="result" id="response-result" hidden>
       <div class="result-summary">
         <span class="badge pass" id="status-badge">PASS</span>
@@ -1196,6 +1200,8 @@
       row.remove();
       if (!container.children.length) addPair(container, kind);
       updateCounts();
+      // 删除参数/请求头行也改变了请求，使现有单次结果快照过期。
+      clearSingleResultIfStale();
     });
 
     row.appendChild(nameInput);
@@ -1412,10 +1418,12 @@
     var payload = collect();
     if (!payload) return;
 
+    var requestHash = formSnapshot();
     singleResultPayload = JSON.parse(JSON.stringify(payload));
-    singleResultFormHash = formSnapshot();
+    singleResultFormHash = requestHash;
     lastSentUrl = normalizeUrl(payload.url);
     setAssertionAlert("");
+    setResultStale(false);
     g("single-add-case").disabled = true;
     setLoading(true);
     try {
@@ -1430,6 +1438,17 @@
       } catch (e) {
         throw new Error("本地测试服务返回了无法解析的响应");
       }
+
+      // 请求期间表单变动（改 URL、Method、Params/Headers、Body 或断言）→
+      // 本次响应不再对应当前表单，标记为过期，不写入 meta、不启用创建按钮。
+      if (formSnapshot() !== requestHash) {
+        showResult(data);
+        // 让用户看到真实响应，但立刻废除基线相关状态
+        invalidateSingleResult();
+        setResultStale(true);
+        return;
+      }
+
       showResult(data);
       singleResultMeta = {
         expectedStatus: data.expectedStatus,
@@ -1440,6 +1459,7 @@
         status: data.status,
         reasonCode: data.reasonCode
       };
+      setResultStale(false);
       g("single-add-case").disabled = false;
     } catch (e) {
       showResult({
@@ -1455,6 +1475,7 @@
       });
       // 请求未完成，不应生成任何断言基线。
       invalidateSingleResult();
+      setResultStale(false);
     } finally {
       setLoading(false);
     }
@@ -1465,6 +1486,9 @@
     el.url.value = EXAMPLE.url;
     el.expectStatus.value = EXAMPLE.status;
     el.expectContains.value = EXAMPLE.contains;
+    // 示例也作为当前断言的归属 URL，这样用户在未发送的情况下直接改 URL
+    // 时 checkUrlSwitch 能检测到 URL 变化并清空示例断言，避免旧断言污染新接口。
+    lastSentUrl = normalizeUrl(EXAMPLE.url);
     el.body.value = "";
     resetPairs();
     clearErrors();
@@ -1494,6 +1518,7 @@
   function clearSingleResultIfStale() {
     if (singleResultPayload && singleFormChangedSinceSend()) {
       invalidateSingleResult();
+      setResultStale(true);
     }
   }
 
@@ -1543,6 +1568,8 @@
   document.querySelectorAll("[data-add]").forEach(function (button) {
     button.addEventListener("click", function () {
       addPair(document.getElementById(button.dataset.add), button.dataset.add);
+      // 新增参数/请求头行改变了请求，使现有单次结果快照过期。
+      clearSingleResultIfStale();
     });
   });
   el.params.addEventListener("input", updateCounts);
@@ -1652,6 +1679,12 @@
     singleResultMeta = null;
     singleResultFormHash = null;
     g("single-add-case").disabled = true;
+  }
+
+  function setResultStale(isStale) {
+    var banner = document.getElementById("result-stale-banner");
+    if (!banner) return;
+    banner.hidden = !isStale;
   }
 
   function setAssertionAlert(message) {

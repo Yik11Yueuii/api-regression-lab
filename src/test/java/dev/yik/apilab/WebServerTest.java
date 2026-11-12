@@ -120,6 +120,74 @@ class WebServerTest {
                 "V2-03.1 must detect URL switches and avoid assertion pollution");
         assertTrue(response.body().contains("function caseStatusLabel(c)"),
                 "V2-03.1 must distinguish PASS·仅状态码 from PASS");
+        // Bug-fix coverage (V2-03.1 follow-up): the stale banner DOM element
+        // and the in-request stale check must be wired up.
+        assertTrue(response.body().contains("id=\"result-stale-banner\""),
+                "Stale-result banner must exist in the DOM");
+    }
+
+    @Test
+    void submitTestChecksFormStalenessAfterFetch() throws Exception {
+        String body = pageBody();
+
+        int start = body.indexOf("async function submitTest(event)");
+        assertTrue(start >= 0, "submitTest must exist");
+        int end = body.indexOf("\n  function ", start);
+        assertTrue(end > start, "submitTest must close properly");
+        String submitFunc = body.substring(start, end);
+
+        // After await fetch returns, formSnapshot() must be compared against
+        // the pre-request requestHash before trusting the result.
+        assertTrue(submitFunc.contains("var requestHash = formSnapshot()"),
+                "submitTest must capture requestHash before fetch");
+        assertTrue(submitFunc.contains("formSnapshot() !== requestHash"),
+                "submitTest must detect form changes that happened during fetch");
+        assertTrue(submitFunc.contains("setResultStale(true)"),
+                "stale results must flip the banner and invalidate baseline state");
+    }
+
+    @Test
+    void loadExamplePlacesInitialAnchorUrl() throws Exception {
+        String body = pageBody();
+
+        int start = body.indexOf("function loadExample(focusUrl)");
+        assertTrue(start >= 0, "loadExample must exist");
+        int end = body.indexOf("\n  function ", start);
+        assertTrue(end > start, "loadExample must close properly");
+        String func = body.substring(start, end);
+
+        // Bug fix: the example itself must be registered as the lastSentUrl
+        // anchor so that switching URL without ever sending a request still
+        // clears the inherited expectContains.
+        assertTrue(func.contains("lastSentUrl = normalizeUrl(EXAMPLE.url)"),
+                "loadExample must register EXAMPLE.url as the anchor for the initial assertion");
+    }
+
+    @Test
+    void pairRowMutationsAlsoTriggerStaleGuard() throws Exception {
+        String body = pageBody();
+
+        // addPair's remove button must hook clearSingleResultIfStale so that
+        // deleting a param/header row invalidates any existing result snapshot.
+        int addPairStart = body.indexOf("function addPair(container, kind)");
+        assertTrue(addPairStart >= 0, "addPair must exist");
+        int addPairEnd = body.indexOf("\n  function ", addPairStart);
+        assertTrue(addPairEnd > addPairStart, "addPair must close properly");
+        String addPair = body.substring(addPairStart, addPairEnd);
+
+        // Check that pair-remove click handler calls clearSingleResultIfStale —
+        // use a substring match rather than relying on exact formatting.
+        int removeClick = addPair.indexOf("remove.addEventListener(\"click\"");
+        assertTrue(removeClick >= 0, "remove button must have a click handler");
+        assertTrue(addPair.indexOf("clearSingleResultIfStale()", removeClick) >= removeClick,
+                "remove click must call clearSingleResultIfStale");
+
+        // data-add click handler must also trigger stale guard.
+        int closeIdx = body.indexOf("[data-add]");
+        assertTrue(closeIdx >= 0);
+        int staleIdx = body.indexOf("clearSingleResultIfStale()", closeIdx);
+        assertTrue(staleIdx >= closeIdx && staleIdx < closeIdx + 500,
+                "data-add click handler must call clearSingleResultIfStale");
     }
 
     @Test
@@ -502,6 +570,14 @@ class WebServerTest {
         assertThrows(IllegalArgumentException.class, () -> WebServer.run(
                 new String[] {"--web", "--web"},
                 new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8)));
+    }
+
+    private String pageBody() throws Exception {
+        HttpResponse<String> response = client.send(
+                HttpRequest.newBuilder(URI.create(webBase + "/")).GET().build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, response.statusCode());
+        return response.body();
     }
 
     private ObjectNode casePayload(String path, int expectedStatus) {
