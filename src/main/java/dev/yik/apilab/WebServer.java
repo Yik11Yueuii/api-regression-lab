@@ -352,6 +352,14 @@ final class WebServer implements AutoCloseable {
         }
     }
 
+    private static void putNullable(ObjectNode node, String field, String value) {
+        if (value == null) {
+            node.putNull(field);
+        } else {
+            node.put(field, value);
+        }
+    }
+
     /**
      * Builds a short, safe explanation for the browser. Only the reason code and the engine's own
      * one-line message are used, so request bodies, headers and stack traces never leak.

@@ -262,6 +262,83 @@ class WebServerTest {
     }
 
     @Test
+    void sequentialRunsUseLatestConfiguration() throws Exception {
+        // The web test set runs every case through /api/run one by one; each call must be fully
+        // independent so an edited case is executed with its latest URL and assertion.
+        ObjectNode first = casePayload("/ok", 200);
+        assertEquals("PASS", send(first).get("status").asText());
+
+        ObjectNode edited = casePayload("/text", 200);
+        assertEquals("PASS", send(edited).get("status").asText());
+
+        ObjectNode changed = casePayload("/ok", 201);
+        JsonNode result = send(changed);
+        assertEquals("FAIL", result.get("status").asText());
+        assertEquals("STATUS_MISMATCH", result.get("reasonCode").asText());
+        assertEquals(201, result.get("expectedStatus").asInt());
+        assertEquals(200, result.get("actualStatus").asInt());
+    }
+
+    @Test
+    void batchEndpointIsRemoved() throws Exception {
+        // V2-02 batch execution now goes through /api/run one case at a time, so the old
+        // duplicate engine endpoint must no longer exist.
+        HttpRequest request = HttpRequest.newBuilder(URI.create(webBase + "/api/batch"))
+                .header("Origin", webBase)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"version\":1,\"cases\":[]}"))
+                .build();
+
+        HttpResponse<String> response = client.send(request,
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(405, response.statusCode(), "no batch route may remain");
+    }
+
+    @Test
+    void arrayPayloadReturns400() throws Exception {
+        HttpResponse<String> response = post("[]", webBase);
+
+        assertEquals(400, response.statusCode());
+        assertEquals("ERROR", JSON.readTree(response.body()).get("status").asText());
+    }
+
+    @Test
+    void postWithoutBodyReturns400() throws Exception {
+        ObjectNode payload = casePayload("/post-created", 201);
+        payload.put("method", "POST");
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        JsonNode body = JSON.readTree(response.body());
+        assertEquals("INVALID_REQUEST", body.get("reasonCode").asText());
+        assertFalse(body.get("message").asText().contains("Exception"));
+    }
+
+    @Test
+    void getWithBodyReturns400() throws Exception {
+        ObjectNode payload = casePayload("/ok", 200);
+        payload.put("body", "{\"name\":\"测试\"}");
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        assertEquals("ERROR", JSON.readTree(response.body()).get("status").asText());
+    }
+
+    @Test
+    void statusOutOfRangeReturns400() throws Exception {
+        ObjectNode payload = casePayload("/ok", 999);
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        assertTrue(JSON.readTree(response.body()).get("message").asText()
+                .contains("between 100 and 599"));
+    }
+
+    @Test
     void responsePreviewShowsTargetBody() throws Exception {
         ObjectNode payload = casePayload("/body", 200);
 
@@ -331,6 +408,7 @@ class WebServerTest {
         assertTrue(message.contains("无法连接"), message);
         assertFalse(message.contains("Exception"), "stack details must not leak: " + message);
         assertFalse(message.contains("\tat "), "stack details must not leak: " + message);
+        assertFalse(message.contains("PrintStream"), "log objects must not leak: " + message);
         assertTrue(result.get("responseBody").isNull(), "no response means no preview");
         assertFalse(result.get("responseTruncated").asBoolean());
         assertEquals(0, result.get("responseBytes").asInt());
