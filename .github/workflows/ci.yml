@@ -29,11 +29,11 @@ jobs:
 
       - name: Verify executable jar
         run: |
-          test -f target/api-regression-lab-0.1.0.jar
-          unzip -l target/api-regression-lab-0.1.0.jar | grep -q 'dev/yik/apilab/Main.class'
-          unzip -l target/api-regression-lab-0.1.0.jar | grep -q 'com/fasterxml/jackson/databind/ObjectMapper.class'
+          test -f target/api-regression-lab-0.2.0.jar
+          unzip -l target/api-regression-lab-0.2.0.jar | grep -q 'dev/yik/apilab/Main.class'
+          unzip -l target/api-regression-lab-0.2.0.jar | grep -q 'com/fasterxml/jackson/databind/ObjectMapper.class'
           set +e
-          java -jar target/api-regression-lab-0.1.0.jar --url http://127.0.0.1:1/unreachable --expect-status 200
+          java -jar target/api-regression-lab-0.2.0.jar --url http://127.0.0.1:1/unreachable --expect-status 200
           code=$?
           set -e
           echo "unreachable target exit code: $code"
@@ -43,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: api-regression-lab-jar
-          path: target/api-regression-lab-0.1.0.jar
+          path: target/api-regression-lab-0.2.0.jar
           retention-days: 7

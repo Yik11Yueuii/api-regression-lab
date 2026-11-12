@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本（V1-04）支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。
+一个轻量级 Java API 回归测试工具。当前版本 v0.2.0 已完成 V1 全部功能：支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。
 
 ## 环境要求
 
@@ -21,7 +21,7 @@ mvn clean test
 mvn package
 ```
 
-构建成功后生成可执行 JAR：`target/api-regression-lab-0.1.0.jar`。JAR 通过 Maven Shade Plugin 打包，已内置 JSON 解析依赖（Jackson），可直接 `java -jar` 运行，无需额外配置 classpath。如果 Maven 默认不是 Java 21，可在当前终端临时切换（不要改系统全局变量）。
+构建成功后生成可执行 JAR：`target/api-regression-lab-0.2.0.jar`。JAR 通过 Maven Shade Plugin 打包，已内置 JSON 解析依赖（Jackson），可直接 `java -jar` 运行，无需额外配置 classpath。如果 Maven 默认不是 Java 21，可在当前终端临时切换（不要改系统全局变量）。
 
 PowerShell：
 
@@ -44,39 +44,39 @@ mvn -v
 ## CLI 使用
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --url <URL> --expect-status <状态码> [--method GET|POST] [--body-json <JSON字符串>] [--expect-contains <文本>] [--header "名称: 值"]... [--query "名称=值"]...
-java -jar target/api-regression-lab-0.1.0.jar --file <用例文件.json>
-java -jar target/api-regression-lab-0.1.0.jar --suite <suite.json> [--report-json <报告文件.json>]
+java -jar target/api-regression-lab-0.2.0.jar --url <URL> --expect-status <状态码> [--method GET|POST] [--body-json <JSON字符串>] [--expect-contains <文本>] [--header "名称: 值"]... [--query "名称=值"]...
+java -jar target/api-regression-lab-0.2.0.jar --file <用例文件.json>
+java -jar target/api-regression-lab-0.2.0.jar --suite <suite.json> [--report-json <报告文件.json>]
 ```
 
 示例（目标服务必须实际启动后才能访问）：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --url http://localhost:8080/api/weather --expect-status 200 --expect-contains "多云"
+java -jar target/api-regression-lab-0.2.0.jar --url http://localhost:8080/api/weather --expect-status 200 --expect-contains "多云"
 ```
 
 带自定义请求头与查询参数（Windows PowerShell 使用双引号，值中的空格与中文无需自行转义）：
 
 ```powershell
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather?unit=c" --expect-status 200 --header "Accept: application/json" --header "X-Request-Id: demo-1" --query "city=北京" --query "q=hello world" --expect-contains "ok"
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/api/weather?unit=c" --expect-status 200 --header "Accept: application/json" --header "X-Request-Id: demo-1" --query "city=北京" --query "q=hello world" --expect-contains "ok"
 ```
 
 发送 POST 请求与 JSON 请求体。Windows PowerShell 5.1 向原生程序传参时会吞掉参数内的双引号，因此 JSON 里的双引号需要写成 `\"`，外层用单引号包裹（已实测服务端收到完整 JSON）：
 
 ```powershell
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --method POST --body-json '{\"name\":\"张三\",\"city\":\"北京\"}' --expect-status 201 --expect-contains "id" --header "Accept: application/json"
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/api/weather" --method POST --body-json '{\"name\":\"张三\",\"city\":\"北京\"}' --expect-status 201 --expect-contains "id" --header "Accept: application/json"
 ```
 
 bash / zsh 中单引号会原样传递，直接写 JSON 即可：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --url 'http://localhost:8080/api/weather' --method POST --body-json '{"name":"张三","city":"北京"}' --expect-status 201 --expect-contains 'id'
+java -jar target/api-regression-lab-0.2.0.jar --url 'http://localhost:8080/api/weather' --method POST --body-json '{"name":"张三","city":"北京"}' --expect-status 201 --expect-contains 'id'
 ```
 
 bash 中使用单引号可以避免 `&`、`$`、空格被 shell 解释：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --url 'http://localhost:8080/api/weather?unit=c' --expect-status 200 --header 'Accept: application/json' --query 'city=北京' --query 'q=hello world' --expect-contains 'ok'
+java -jar target/api-regression-lab-0.2.0.jar --url 'http://localhost:8080/api/weather?unit=c' --expect-status 200 --header 'Accept: application/json' --query 'city=北京' --query 'q=hello world' --expect-contains 'ok'
 ```
 
 参数：
@@ -116,7 +116,7 @@ java -jar target/api-regression-lab-0.1.0.jar --url 'http://localhost:8080/api/w
 用 `--file <路径>` 从本地 JSON 文件读取一个测试用例，路径可以是相对路径或绝对路径：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --file examples/weather-get.json
+java -jar target/api-regression-lab-0.2.0.jar --file examples/weather-get.json
 ```
 
 文件模式与命令行模式互斥：`--file` 不能与 `--url`、`--method`、`--body-json`、`--expect-status`、`--expect-contains`、`--header`、`--query` 混用，也不能重复提供。
@@ -154,7 +154,7 @@ java -jar target/api-regression-lab-0.1.0.jar --file examples/weather-get.json
 用 `--suite <清单路径>` 顺序执行多个已有测试用例文件：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json
+java -jar target/api-regression-lab-0.2.0.jar --suite examples/suite.json
 ```
 
 清单格式（[examples/suite.json](examples/suite.json)）：
@@ -196,7 +196,7 @@ java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json
 退出码可用于脚本或 CI 判断，例如 PowerShell：
 
 ```powershell
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
 if ($LASTEXITCODE -ne 0) { throw "API regression failed with exit code $LASTEXITCODE" }
 ```
 
@@ -204,13 +204,13 @@ if ($LASTEXITCODE -ne 0) { throw "API regression failed with exit code $LASTEXIT
 
 ```powershell
 # 退出码 0：状态码与响应体断言均通过
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --expect-contains "ok"
 
 # 退出码 1：状态码不匹配（例如目标返回 404）
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/missing" --expect-status 200
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/missing" --expect-status 200
 
 # 退出码 2：参数错误（非法请求头）
-java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --header "NoColonHere"
+java -jar target/api-regression-lab-0.2.0.jar --url "http://localhost:8080/api/weather" --expect-status 200 --header "NoColonHere"
 ```
 
 ## JSON 测试报告
@@ -218,7 +218,7 @@ java -jar target/api-regression-lab-0.1.0.jar --url "http://localhost:8080/api/w
 在 suite 模式下追加 `--report-json <输出文件路径>`，执行完成后生成一份 JSON 报告：
 
 ```bash
-java -jar target/api-regression-lab-0.1.0.jar --suite examples/suite.json --report-json reports/result.json
+java -jar target/api-regression-lab-0.2.0.jar --suite examples/suite.json --report-json reports/result.json
 ```
 
 Windows 路径分隔符可写成 `\\` 或直接用 `/`。
