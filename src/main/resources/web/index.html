@@ -103,6 +103,33 @@
     padding: 36px 32px 72px;
   }
 
+  .workspace-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 26px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #f1ede6;
+  }
+  .workspace-tab {
+    flex: 1 1 0;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .workspace-tab[aria-selected="true"] {
+    background: var(--surface);
+    color: var(--accent);
+    box-shadow: 0 1px 4px rgba(48, 45, 41, .08);
+  }
+  .workspace-tab:hover { color: var(--ink); }
+  .workspace[hidden], .case-editor[hidden] { display: none; }
+
   .intro { margin-bottom: 24px; }
 
   .intro h1 {
@@ -387,6 +414,7 @@
     font-family: "Cascadia Code", Consolas, monospace;
     font-size: 11.5px;
   }
+  .response-actions { display: flex; align-items: center; gap: 12px; }
 
   .empty-state {
     padding: 40px 20px 44px;
@@ -556,7 +584,40 @@
   }
 
   /* ---- batch workspace ---- */
-  .batch-panel { margin-top: 28px; }
+  .batch-panel { margin-top: 0; }
+  .case-editor { margin-bottom: 18px; overflow: hidden; }
+  .case-editor-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--line);
+    background: #faf8f4;
+  }
+  .case-editor-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .case-editor-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+  .case-editor-body .editor { border: 0; border-radius: 0; }
+  #test-form.case-mode .send-button { display: none; }
+  #test-form.case-mode .request-line { grid-template-columns: 104px minmax(0, 1fr); }
+  .case-editor-body { padding-top: 14px; }
+  .case-editor-body .edit-banner { margin: 0 20px 12px; }
+  .case-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--line);
+    background: #faf8f4;
+  }
+  .assertion-review {
+    margin: 0 20px 14px;
+    padding: 9px 12px;
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    color: #6f554a;
+    font-size: 12.5px;
+  }
   .edit-banner {
     display: flex;
     align-items: center;
@@ -640,7 +701,7 @@
   .batch-cases { padding: 8px 0 0; }
   .batch-case {
     display: grid;
-    grid-template-columns: minmax(0,1fr) auto auto auto auto;
+    grid-template-columns: minmax(0,1fr) auto auto auto;
     gap: 10px;
     align-items: center;
     padding: 10px 20px;
@@ -663,6 +724,20 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .case-assertions {
+    color: #6f675e;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .case-duration {
+    min-width: 58px;
+    color: var(--muted);
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11.5px;
+    text-align: right;
   }
   .case-method {
     display: inline-block;
@@ -736,10 +811,14 @@
     color: #5c5248;
   }
   .batch-case.open + .case-detail { display: block; }
+  .batch-case { cursor: pointer; }
+  .case-detail p { margin: 0 0 8px; }
+  .case-detail .case-reason { color: #6f554a; white-space: pre-wrap; }
+  .case-detail .preview-meta { color: var(--muted); font-size: 11.5px; }
   .case-detail pre {
     margin: 8px 0 0;
     padding: 10px 12px;
-    max-height: 200px;
+    max-height: 260px;
     overflow: auto;
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -748,6 +827,7 @@
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .progress {
     display: inline-flex;
@@ -766,10 +846,20 @@
     animation: spin .6s linear infinite;
   }
   @media (max-width: 720px) {
-    .batch-case { grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; padding: 10px 16px; }
-    .batch-case .case-method { display: none; }
-    .case-controls { grid-column: 3; }
+    .workspace-tabs { margin-bottom: 20px; }
+    .workspace-tab { padding: 9px 8px; font-size: 13px; }
+    .response-actions { gap: 8px; }
+    .response-actions .ghost-cta { padding: 4px 8px; font-size: 11.5px; }
+    .case-editor-head, .case-editor-actions { padding-left: 16px; padding-right: 16px; }
+    .case-editor-body .edit-banner, .assertion-review { margin-left: 16px; margin-right: 16px; }
+    #test-form.case-mode .request-line { grid-template-columns: 92px minmax(0, 1fr); }
+    .batch-head { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
+    .batch-actions { justify-content: flex-start; gap: 6px; }
+    .batch-case { grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; padding: 12px 16px; }
+    .case-duration { min-width: 48px; }
+    .case-controls { grid-column: 1 / -1; justify-self: end; }
     .batch-summary { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .case-detail { padding-left: 16px; padding-right: 16px; }
   }
 </style>
 </head>
@@ -780,6 +870,14 @@
 </header>
 
 <main class="page">
+  <nav class="workspace-tabs" role="tablist" aria-label="测试工作区">
+    <button type="button" class="workspace-tab" id="workspace-tab-single" role="tab"
+            aria-selected="true" aria-controls="single-workspace">单接口测试</button>
+    <button type="button" class="workspace-tab" id="workspace-tab-batch" role="tab"
+            aria-selected="false" aria-controls="batch-workspace">批量回归测试</button>
+  </nav>
+
+  <section class="workspace" id="single-workspace" role="tabpanel" aria-labelledby="workspace-tab-single">
   <section class="intro">
     <h1>单接口测试</h1>
     <p>填写请求并校验状态码与响应内容。所有请求只从本机发出，不保存任何输入或响应。
@@ -787,13 +885,8 @@
     </p>
   </section>
 
+  <div id="single-editor-host">
   <form id="test-form" novalidate autocomplete="off">
-    <div class="edit-banner" id="edit-banner" role="status" hidden>
-      <span class="edit-label">正在编辑测试集用例</span>
-      <input type="text" id="edit-name" class="edit-name" maxlength="60" placeholder="用例名称" aria-label="用例名称">
-      <button type="button" class="ghost-cta primary" id="edit-save">保存修改</button>
-      <button type="button" class="ghost-cta" id="edit-cancel">取消编辑</button>
-    </div>
     <section class="panel editor">
       <div class="request-line">
         <label class="sr-only" for="method">HTTP 方法</label>
@@ -879,11 +972,15 @@
       </div>
     </section>
   </form>
+  </div>
 
   <section class="panel response-panel" aria-live="polite">
     <div class="response-head">
       <h2>响应</h2>
-      <span class="elapsed" id="elapsed"></span>
+      <div class="response-actions">
+        <button type="button" class="ghost-cta" id="single-add-case" disabled>从结果创建用例</button>
+        <span class="elapsed" id="elapsed"></span>
+      </div>
     </div>
 
     <div class="empty-state" id="response-empty">发送请求后，这里会显示断言结果与实际响应内容。</div>
@@ -915,21 +1012,53 @@
   </section>
 
   <p class="shortcut"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 发送测试</p>
+  </section>
 
-  <section class="panel batch-panel" aria-labelledby="batch-title">
+  <section class="workspace" id="batch-workspace" role="tabpanel"
+           aria-labelledby="workspace-tab-batch" hidden>
+    <section class="intro">
+      <h1>批量回归测试</h1>
+      <p>逐个创建并审核用例，按顺序执行。配置、逐条进度和本次结果仅保留在当前页面内存中。</p>
+    </section>
+
+    <section class="panel case-editor" id="case-editor" aria-labelledby="case-editor-title" hidden>
+      <div class="case-editor-head">
+        <div>
+          <h2 id="case-editor-title">添加用例</h2>
+          <p id="case-editor-note">检查请求和断言后再保存，不会自动继承上一条用例。</p>
+        </div>
+        <button type="button" class="icon-btn" id="case-editor-close" aria-label="关闭编辑器" title="关闭编辑器">×</button>
+      </div>
+      <div class="case-editor-body">
+        <div class="edit-banner" id="edit-banner">
+          <label class="edit-label" for="edit-name">用例名称</label>
+          <input type="text" id="edit-name" class="edit-name" maxlength="60"
+                 placeholder="根据 URL 自动生成，可修改" aria-label="用例名称">
+        </div>
+        <div class="assertion-review" id="case-assertion-review" aria-live="polite"></div>
+        <div id="case-editor-host"></div>
+      </div>
+      <div class="case-editor-actions">
+        <button type="button" class="ghost-cta" id="edit-cancel">取消</button>
+        <button type="button" class="ghost-cta primary" id="edit-save">保存用例</button>
+      </div>
+    </section>
+
+    <section class="panel batch-panel" aria-labelledby="batch-title">
     <div class="batch-head">
       <h2 id="batch-title">测试集</h2>
       <div class="batch-actions">
-        <button type="button" class="ghost-cta" id="batch-add-current">加入当前接口</button>
+        <button type="button" class="ghost-cta primary" id="batch-add-current">添加用例</button>
         <button type="button" class="ghost-cta" id="batch-import">导入…</button>
         <button type="button" class="ghost-cta" id="batch-export">导出…</button>
-        <button type="button" class="ghost-cta" id="batch-download" disabled>下载报告</button>
+        <button type="button" class="ghost-cta" id="batch-download" disabled>下载 JSON 报告</button>
+        <button type="button" class="ghost-cta" id="batch-download-html" disabled>下载 HTML 报告</button>
         <button type="button" class="ghost-cta primary" id="batch-run" disabled>运行全部</button>
       </div>
     </div>
 
     <div id="batch-wrap">
-      <div class="batch-empty" id="batch-empty">还没有用例。先在上面填一个接口，点击「加入当前接口」。</div>
+      <div class="batch-empty" id="batch-empty">还没有用例。点击「添加用例」开始，或从单接口测试结果创建。</div>
       <div class="batch-cases" id="batch-cases" hidden></div>
       <div class="batch-summary" id="batch-summary" hidden>
         <div>
@@ -943,6 +1072,7 @@
     </div>
 
     <input type="file" id="batch-file" accept="application/json,.json" hidden>
+    </section>
   </section>
 </main>
 
@@ -987,9 +1117,12 @@
     countHeaders: document.getElementById("count-headers")
   };
 
-  var tabs = Array.prototype.slice.call(document.querySelectorAll("[role=tab]"));
-  var panels = Array.prototype.slice.call(document.querySelectorAll("[role=tabpanel]"));
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tabs [role=tab]"));
+  var panels = Array.prototype.slice.call(document.querySelectorAll(".tab-panel[role=tabpanel]"));
   var running = false;
+  var singleResultPayload = null;
+  var activeWorkspace = "single";
+  var caseEditorOpen = false;
 
   function tabButton(name) {
     return document.getElementById("tab-" + name);
@@ -1240,6 +1373,7 @@
 
     el.responseEmpty.hidden = true;
     el.responseResult.hidden = false;
+    g("single-add-case").disabled = !singleResultPayload;
     el.statusBadge.textContent = status;
     el.statusBadge.className = "badge " + statusClass;
     el.summaryText.textContent = summary;
@@ -1257,11 +1391,14 @@
 
   async function submitTest(event) {
     if (event) event.preventDefault();
-    if (running) return;
+    if (caseEditorOpen) { saveCase(); return; }
+    if (running || activeWorkspace !== "single") return;
 
     var payload = collect();
     if (!payload) return;
 
+    singleResultPayload = JSON.parse(JSON.stringify(payload));
+    g("single-add-case").disabled = true;
     setLoading(true);
     try {
       var response = await fetch("/api/run", {
@@ -1321,8 +1458,15 @@
 
   el.form.addEventListener("submit", submitTest);
   el.method.addEventListener("change", syncMethod);
-  el.url.addEventListener("input", function () { setError("error-url", ""); });
-  el.expectStatus.addEventListener("input", function () { setError("error-status", ""); });
+  el.url.addEventListener("input", function () {
+    setError("error-url", "");
+    if (caseEditorOpen && !caseNameTouched) g("edit-name").value = suggestName(el.url.value.trim());
+  });
+  el.expectStatus.addEventListener("input", function () {
+    setError("error-status", "");
+    updateAssertionReview();
+  });
+  el.expectContains.addEventListener("input", updateAssertionReview);
   el.body.addEventListener("input", function () { setError("error-body", ""); });
   document.getElementById("load-example").addEventListener("click", function () {
     loadExample(true);
@@ -1376,7 +1520,8 @@
   document.addEventListener("keydown", function (event) {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
-      submitTest();
+      if (caseEditorOpen) saveCase();
+      else if (activeWorkspace === "single") submitTest();
     }
   });
 
@@ -1403,15 +1548,38 @@
   var editingIndex = -1;
   var nextCaseId = 1;
   var lastReport = null;
+  var lastReportView = null;
+  var singleDraft = null;
+  var caseNameTouched = false;
 
   function g(id) { return document.getElementById(id); }
 
   function newCaseId() { return nextCaseId++; }
 
+  function switchWorkspace(name) {
+    if (name !== "single" && name !== "batch") return;
+    if (name === "single" && caseEditorOpen) {
+      alert("请先保存或取消当前用例编辑，再切换到单接口测试。");
+      return;
+    }
+    activeWorkspace = name;
+    g("single-workspace").hidden = name !== "single";
+    g("batch-workspace").hidden = name !== "batch";
+    g("workspace-tab-single").setAttribute("aria-selected", name === "single" ? "true" : "false");
+    g("workspace-tab-batch").setAttribute("aria-selected", name === "batch" ? "true" : "false");
+  }
+
   function suggestName(url) {
-    var clean = (url || "").replace(/\/+$/, "");
-    var m = clean.match(/[^/]+$/);
-    return m ? m[0] : clean;
+    if (!url) return "";
+    try {
+      var parsed = new URL(url);
+      var parts = parsed.pathname.split("/").filter(Boolean);
+      var candidate = parts.length ? parts[parts.length - 1] : parsed.hostname;
+      try { candidate = decodeURIComponent(candidate); } catch (ignored) { /* keep encoded text */ }
+      return candidate.trim().slice(0, 60);
+    } catch (e) {
+      return "";
+    }
   }
 
   function caseNameError(name, exceptIndex, cases) {
@@ -1433,6 +1601,9 @@
     c.reasonCode = null;
     c.message = "";
     c.durationMillis = null;
+    c.responseBody = null;
+    c.responseTruncated = false;
+    c.responseBytes = 0;
     c.open = false;
   }
 
@@ -1464,7 +1635,8 @@
       expectStatus: payload.expectStatus,
       expectContains: payload.expectContains || "",
       status: "", actualStatus: null, reasonCode: null, message: "",
-      durationMillis: null, open: false
+      durationMillis: null, responseBody: null, responseTruncated: false,
+      responseBytes: 0, open: false
     };
   }
 
@@ -1529,6 +1701,7 @@
 
   function invalidateReport() {
     lastReport = null;
+    lastReportView = null;
     batchFailure = "";
     updateBatchButtons();
   }
@@ -1546,6 +1719,45 @@
     }
     renderBatchCases();
     updateBatchSummary();
+  }
+
+  function friendlyResult(c) {
+    var actual = c.actualStatus == null ? "—" : c.actualStatus;
+    if (c.status === "PASS") {
+      return "HTTP 状态码为 " + actual + "，符合预期"
+        + (c.expectContains ? "，响应内容包含『" + c.expectContains + "』。" : "。");
+    }
+    if (c.reasonCode === "BODY_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，符合预期，但响应内容未包含『"
+        + c.expectContains + "』。";
+    }
+    if (c.reasonCode === "STATUS_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，预期为 " + c.expectStatus + "。";
+    }
+    if (c.status === "FAIL") return c.message || "响应未满足预期断言。";
+    if (c.status === "ERROR") return c.message || "请求未能完成。";
+    return "";
+  }
+
+  /* Privacy-safe explanation for exported HTML reports. Must never echo
+     the raw expected-contains text because assertion content may hold
+     tokens, keys, or other secrets. The inline batch UI keeps the full
+     friendlyResult above for day-to-day debugging. */
+  function htmlReportExplanation(c) {
+    var actual = c.actualStatus == null ? "—" : c.actualStatus;
+    if (c.status === "PASS") {
+      return "HTTP 状态码为 " + actual + "，符合预期"
+        + (c.expectContains ? "，响应内容满足包含文本断言。" : "。");
+    }
+    if (c.reasonCode === "BODY_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，符合预期，但响应内容未满足包含文本断言。";
+    }
+    if (c.reasonCode === "STATUS_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，预期为 " + c.expectStatus + "。";
+    }
+    if (c.status === "FAIL") return "响应未满足预期断言。";
+    if (c.status === "ERROR") return "请求未能完成。";
+    return "";
   }
 
   function renderBatchCases() {
@@ -1576,10 +1788,15 @@
       uri.textContent = c.method + " " + c.url;
       uri.title = c.url;
       main.appendChild(uri);
+      var assertions = document.createElement("div");
+      assertions.className = "case-assertions";
+      assertions.textContent = "预期 " + c.expectStatus + " · "
+        + (c.expectContains ? "包含『" + c.expectContains + "』" : "不校验响应文本");
+      main.appendChild(assertions);
 
-      var method = document.createElement("span");
-      method.className = "case-method";
-      method.textContent = c.method;
+      var duration = document.createElement("span");
+      duration.className = "case-duration";
+      duration.textContent = c.durationMillis == null ? "—" : c.durationMillis + " ms";
 
       var status = document.createElement("span");
       status.className = "case-status " + (c.status ? c.status.toLowerCase() : "empty");
@@ -1591,10 +1808,10 @@
       var down = iconBtn("↓", "下移");
       var edit = iconBtn("✎", "编辑此用例");
       var del = iconBtn("×", "删除");
-      var locked = batchRunning || editingIndex >= 0;
+      var locked = batchRunning || caseEditorOpen;
       up.disabled = locked || i === 0;
       down.disabled = locked || i === batchCases.length - 1;
-      edit.disabled = batchRunning;
+      edit.disabled = locked;
       del.disabled = locked;
       up.onclick = function () { moveCase(i, -1); };
       down.onclick = function () { moveCase(i, 1); };
@@ -1603,7 +1820,7 @@
       ctrls.appendChild(up); ctrls.appendChild(down); ctrls.appendChild(edit); ctrls.appendChild(del);
 
       row.appendChild(main);
-      row.appendChild(method);
+      row.appendChild(duration);
       row.appendChild(status);
       row.appendChild(ctrls);
       row.onclick = function (ev) {
@@ -1615,16 +1832,41 @@
       if (c.open) {
         var detail = document.createElement("div");
         detail.className = "case-detail";
-        var info = "预期：" + c.expectStatus + " / 实际：" + (c.actualStatus == null ? "—" : c.actualStatus)
-          + " / 耗时：" + (c.durationMillis == null ? "—" : c.durationMillis) + " ms";
-        if (c.reasonCode) info += "\n原因：" + c.reasonCode;
-        if (c.message) info += " — " + c.message;
-        if (pendingCredentials(c)) {
-          info += "\n待补全的请求头：" + sensitiveNames(c).join("、") + "（当前值为 " + PLACEHOLDER + "）";
+        var facts = document.createElement("p");
+        facts.textContent = "预期状态码：" + c.expectStatus + " · 实际状态码："
+          + (c.actualStatus == null ? "—" : c.actualStatus) + " · 耗时："
+          + (c.durationMillis == null ? "—" : c.durationMillis + " ms");
+        detail.appendChild(facts);
+        var reasonText = friendlyResult(c);
+        if (reasonText) {
+          var reason = document.createElement("p");
+          reason.className = "case-reason";
+          reason.textContent = reasonText;
+          detail.appendChild(reason);
         }
-        var pre = document.createElement("pre");
-        pre.textContent = info;
-        detail.appendChild(pre);
+        if (pendingCredentials(c)) {
+          var pending = document.createElement("p");
+          pending.textContent = "待补全的请求头：" + sensitiveNames(c).join("、")
+            + "（当前值为 " + PLACEHOLDER + "）";
+          detail.appendChild(pending);
+        }
+        if (c.status) {
+          var meta = document.createElement("p");
+          meta.className = "preview-meta";
+          meta.textContent = "实际响应（仅本次页面预览）"
+            + (c.responseBytes ? " · " + formatBytes(c.responseBytes) : "")
+            + (c.responseTruncated ? " · 仅显示前 " + MAX_PREVIEW_LABEL : "");
+          detail.appendChild(meta);
+          if (c.responseBody) {
+            var pre = document.createElement("pre");
+            pre.textContent = c.responseTruncated ? c.responseBody : prettyResponse(c.responseBody);
+            detail.appendChild(pre);
+          } else {
+            var empty = document.createElement("p");
+            empty.textContent = c.responseBody === "" ? "响应体为空。" : "没有收到响应内容（请求未完成）。";
+            detail.appendChild(empty);
+          }
+        }
         root.appendChild(detail);
       }
     });
@@ -1659,96 +1901,193 @@
   }
 
   function updateBatchButtons() {
-    g("batch-run").disabled = batchRunning || batchCases.length === 0;
-    g("batch-download").disabled = !lastReport || batchRunning;
-    g("batch-add-current").disabled = batchRunning || editingIndex >= 0
+    g("batch-run").disabled = batchRunning || caseEditorOpen || batchCases.length === 0;
+    g("batch-download").disabled = !lastReport || batchRunning || caseEditorOpen;
+    g("batch-download-html").disabled = !lastReport || batchRunning || caseEditorOpen;
+    g("batch-add-current").disabled = batchRunning || caseEditorOpen
       || batchCases.length >= MAX_CASES;
-    g("batch-import").disabled = batchRunning;
+    g("batch-import").disabled = batchRunning || caseEditorOpen;
+    g("batch-export").disabled = batchRunning || caseEditorOpen;
   }
 
-  function addFromCurrent() {
-    if (batchRunning || editingIndex >= 0) return;
-    if (batchCases.length >= MAX_CASES) {
-      alert("测试集最多 " + MAX_CASES + " 个用例。");
-      return;
-    }
-    var payload = collect();
-    if (!payload) return;
-    var suggested = suggestName(payload.url);
-    var name = prompt("为此用例命名（可留空，自动从 URL 生成）", suggested);
-    if (name === null) return;
-    name = name.trim() || suggested.trim();
-    var nameError = caseNameError(name, -1);
-    if (nameError) { alert(nameError); return; }
-    name = name.trim();
-    batchCases.push(caseFromPayload(name, payload));
-    invalidateReport();
-    renderBatch();
-    setStatus("已加入「" + name + "」", false);
+  function capturePairs(container) {
+    return Array.prototype.map.call(container.querySelectorAll(".pair"), function (row) {
+      return {
+        name: row.querySelector(".pair-name").value,
+        value: row.querySelector(".pair-value").value
+      };
+    });
   }
 
-  function editToForm(i) {
-    if (batchRunning) return;
-    var c = batchCases[i];
-    editingIndex = i;
-    el.method.value = c.method;
-    el.url.value = c.url;
-    el.expectStatus.value = String(c.expectStatus);
-    el.expectContains.value = c.expectContains || "";
-    el.params.querySelectorAll(".pair").forEach(function (p) { p.remove(); });
-    el.headers.querySelectorAll(".pair").forEach(function (p) { p.remove(); });
-    c.query.forEach(function (kv) {
+  function captureSingleDraft() {
+    var selected = document.querySelector(".tabs [role=tab][aria-selected=true]");
+    return {
+      method: el.method.value,
+      url: el.url.value,
+      expectStatus: el.expectStatus.value,
+      expectContains: el.expectContains.value,
+      body: el.body.value,
+      params: capturePairs(el.params),
+      headers: capturePairs(el.headers),
+      tab: selected ? selected.dataset.tab : "params"
+    };
+  }
+
+  function restorePairs(container, kind, values) {
+    container.textContent = "";
+    values.forEach(function (pair) {
+      var row = addPair(container, kind);
+      row.querySelector(".pair-name").value = pair.name;
+      row.querySelector(".pair-value").value = pair.value;
+    });
+    if (!values.length) addPair(container, kind);
+  }
+
+  function restoreSingleDraft() {
+    if (!singleDraft) return;
+    el.method.value = singleDraft.method;
+    el.url.value = singleDraft.url;
+    el.expectStatus.value = singleDraft.expectStatus;
+    el.expectContains.value = singleDraft.expectContains;
+    el.body.value = singleDraft.body;
+    restorePairs(el.params, "params", singleDraft.params);
+    restorePairs(el.headers, "headers", singleDraft.headers);
+    clearErrors();
+    syncMethod();
+    updateCounts();
+    activateTab(singleDraft.tab, false);
+  }
+
+  function fillRequestEditor(payload) {
+    el.method.value = payload.method || "GET";
+    el.url.value = payload.url || "";
+    el.expectStatus.value = payload.expectStatus == null ? "200" : String(payload.expectStatus);
+    el.expectContains.value = payload.expectContains || "";
+    el.body.value = payload.body || "";
+    el.params.textContent = "";
+    el.headers.textContent = "";
+    (payload.query || []).forEach(function (kv) {
       var eq = kv.indexOf("=");
       var row = addPair(el.params, "params");
       row.querySelector(".pair-name").value = eq >= 0 ? kv.slice(0, eq) : kv;
       row.querySelector(".pair-value").value = eq >= 0 ? kv.slice(eq + 1) : "";
     });
-    c.headers.forEach(function (h) {
+    (payload.headers || []).forEach(function (h) {
       var idx = h.indexOf(":");
       if (idx < 0) return;
       var row = addPair(el.headers, "headers");
       row.querySelector(".pair-name").value = h.slice(0, idx).trim();
       row.querySelector(".pair-value").value = h.slice(idx + 1).trim();
     });
-    el.body.value = c.body || "";
+    if (!el.params.children.length) addPair(el.params, "params");
+    if (!el.headers.children.length) addPair(el.headers, "headers");
+    clearErrors();
     syncMethod();
     updateCounts();
-    clearErrors();
-    g("edit-name").value = c.name || "";
-    g("edit-banner").hidden = false;
-    updateBatchButtons();
-    setStatus("正在编辑「" + c.name + "」，保存后才会生效", false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    el.url.focus();
+    activateTab("params", false);
+    updateAssertionReview();
   }
 
-  function saveEdit() {
-    if (batchRunning || editingIndex < 0) return;
+  function updateAssertionReview() {
+    if (!caseEditorOpen) return;
+    var status = el.expectStatus.value.trim() || "未填写";
+    var contains = el.expectContains.value.trim();
+    g("case-assertion-review").textContent = "当前断言：HTTP 状态码 = " + status + "；"
+      + (contains ? "响应必须包含『" + contains + "』。" : "不校验响应包含文本。");
+  }
+
+  function openCaseEditor(index, payload, source) {
+    if (batchRunning || caseEditorOpen) return;
+    if (index < 0 && batchCases.length >= MAX_CASES) {
+      alert("测试集最多 " + MAX_CASES + " 个用例。");
+      return;
+    }
+    singleDraft = captureSingleDraft();
+    editingIndex = index;
+    caseEditorOpen = true;
+    caseNameTouched = index >= 0;
+    g("case-editor-title").textContent = index >= 0 ? "编辑用例" : "添加用例";
+    g("case-editor-note").textContent = source === "single"
+      ? "已复制本次结果对应的配置，请确认请求和断言后再保存。"
+      : (index >= 0 ? "修改只会保存到当前用例，不会新增或覆盖其他用例。"
+        : "全新用例不会继承上一条配置；默认预期 HTTP 200，不校验响应文本。");
+    g("edit-name").value = index >= 0 ? batchCases[index].name : suggestName(payload.url);
+    g("case-editor").hidden = false;
+    el.form.classList.add("case-mode");
+    g("case-editor-host").appendChild(el.form);
+    fillRequestEditor(payload);
+    renderBatch();
+    setStatus(index >= 0 ? "正在编辑「" + batchCases[index].name + "」，保存后才会生效"
+      : "正在添加用例，保存后才会加入测试集", false);
+    g("case-editor").scrollIntoView({ block: "start", behavior: "smooth" });
+    if (index < 0 && !payload.url) el.url.focus();
+  }
+
+  function closeCaseEditor() {
+    if (!caseEditorOpen) return;
+    caseEditorOpen = false;
+    editingIndex = -1;
+    caseNameTouched = false;
+    g("case-editor").hidden = true;
+    g("single-editor-host").appendChild(el.form);
+    el.form.classList.remove("case-mode");
+    g("edit-name").value = "";
+    restoreSingleDraft();
+    singleDraft = null;
+    clearErrors();
+    renderBatch();
+  }
+
+  function addFromCurrent() {
+    if (batchRunning || caseEditorOpen) return;
+    switchWorkspace("batch");
+    openCaseEditor(-1, {
+      method: "GET", url: "", headers: [], query: [], body: "",
+      expectStatus: 200, expectContains: ""
+    }, "new");
+  }
+
+  function editToForm(i) {
+    if (batchRunning || caseEditorOpen || !batchCases[i]) return;
+    openCaseEditor(i, sanitizeForRequest(batchCases[i]), "edit");
+  }
+
+  function saveCase() {
+    if (batchRunning || !caseEditorOpen) return;
     var payload = collect();
     if (!payload) return;
-    var old = batchCases[editingIndex];
+    var index = editingIndex;
     var name = g("edit-name").value.trim();
-    var nameError = caseNameError(name, editingIndex);
-    if (nameError) { alert(nameError); return; }
+    var nameError = caseNameError(name, index);
+    if (nameError) { alert(nameError); g("edit-name").focus(); return; }
     var updated = caseFromPayload(name, payload);
-    updated.id = old.id;
-    batchCases[editingIndex] = updated;
-    cancelEdit();
+    if (index >= 0) {
+      updated.id = batchCases[index].id;
+      batchCases[index] = updated;
+    } else {
+      batchCases.push(updated);
+    }
+    closeCaseEditor();
     invalidateReport();
     renderBatch();
-    setStatus("已保存「" + name + "」的修改，可运行全部", false);
+    setStatus(index >= 0 ? "已保存「" + name + "」的修改，可运行全部"
+      : "已添加「" + name + "」", false);
   }
 
   function cancelEdit() {
-    editingIndex = -1;
-    g("edit-banner").hidden = true;
-    g("edit-name").value = "";
-    updateBatchButtons();
-    updateBatchSummary();
+    closeCaseEditor();
+  }
+
+  function addFromSingleResult() {
+    if (batchRunning) { alert("批量测试正在执行，请等本次运行完成后再从单接口结果创建用例。"); return; }
+    if (!singleResultPayload || caseEditorOpen) return;
+    if (!confirm("使用本次结果对应的请求配置创建批量用例吗？\n\n下一步会显示完整请求和当前断言，确认保存后才会加入测试集。")) return;
+    switchWorkspace("batch");
+    openCaseEditor(-1, JSON.parse(JSON.stringify(singleResultPayload)), "single");
   }
 
   function moveCase(i, delta) {
-    if (batchRunning || editingIndex >= 0) return;
+    if (batchRunning || caseEditorOpen) return;
     var j = i + delta;
     if (j < 0 || j >= batchCases.length) return;
     var tmp = batchCases[i]; batchCases[i] = batchCases[j]; batchCases[j] = tmp;
@@ -1757,7 +2096,7 @@
   }
 
   function removeCase(i) {
-    if (batchRunning || editingIndex >= 0) return;
+    if (batchRunning || caseEditorOpen) return;
     var name = batchCases[i].name || batchCases[i].url;
     if (!confirm("删除用例 \"" + name + "\" ？")) return;
     batchCases.splice(i, 1);
@@ -1771,7 +2110,7 @@
 
   async function runBatch() {
     if (batchRunning || !batchCases.length) return;
-    if (editingIndex >= 0) { alert("请先保存或取消当前编辑，再运行测试集。"); return; }
+    if (caseEditorOpen) { alert("请先保存或取消当前编辑，再运行测试集。"); return; }
 
     var blocked = batchCases.filter(pendingCredentials);
     if (blocked.length) {
@@ -1792,11 +2131,14 @@
     });
     batchRunning = true;
     lastReport = null;
+    lastReportView = null;
     batchProgress = "";
+    g("single-add-case").disabled = true;
     batchCases.forEach(resetCaseResult);
     renderBatch();
 
     var reportCases = [];
+    var reportViewCases = [];
     batchFailure = "";
     try {
       for (var i = 0; i < snapshot.length; i++) {
@@ -1811,22 +2153,44 @@
           actualStatus: result.actualStatus,
           reasonCode: result.reasonCode
         });
+        var viewCase = {
+          name: snapshot[i].name,
+          status: result.status,
+          expectedStatus: result.expectedStatus,
+          actualStatus: result.actualStatus,
+          durationMillis: result.durationMillis,
+          expectStatus: snapshot[i].payload.expectStatus,
+          expectContains: snapshot[i].payload.expectContains || "",
+          reasonCode: result.reasonCode,
+          message: result.message || ""
+        };
+        viewCase.friendlyMessage = result.status === "ERROR"
+          ? "请求未能完成，请检查目标服务连接或超时设置。" : friendlyResult(viewCase);
+        reportViewCases.push(viewCase);
         renderBatch();
       }
+      var generatedAt = new Date().toISOString();
       lastReport = {
         version: 1,
-        generatedAt: new Date().toISOString(),
+        generatedAt: generatedAt,
         summary: summarize(reportCases),
         cases: reportCases
+      };
+      lastReportView = {
+        generatedAt: generatedAt,
+        summary: summarize(reportCases),
+        cases: reportViewCases
       };
     } catch (e) {
       // A local runner failure is not a target API result. Keep completed rows,
       // leave the rest unfinished, and never expose a partial JSON report.
       lastReport = null;
+      lastReportView = null;
       batchFailure = e && e.message ? e.message : "本地测试服务执行失败";
     } finally {
       batchRunning = false;
       batchProgress = "";
+      g("single-add-case").disabled = !singleResultPayload;
       renderBatch();
     }
   }
@@ -1868,6 +2232,10 @@
       c.reasonCode = result.reasonCode || null;
       c.message = result.message || "";
       c.durationMillis = result.durationMillis == null ? null : result.durationMillis;
+      c.responseBody = result.responseBody == null ? null : result.responseBody;
+      c.responseTruncated = Boolean(result.responseTruncated);
+      c.responseBytes = result.responseBytes == null ? 0 : result.responseBytes;
+      c.open = c.status === "FAIL" || c.status === "ERROR";
       return;
     }
   }
@@ -1896,6 +2264,68 @@
     triggerDownload(JSON.stringify(lastReport, null, 2), REPORT_FILENAME, "application/json");
   }
 
+  function htmlEscape(value) {
+    var entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
+      return entities[ch];
+    });
+  }
+
+  function buildHtmlReport() {
+    var data = lastReportView;
+    var generated = new Date(data.generatedAt);
+    var generatedText = isNaN(generated.getTime())
+      ? data.generatedAt : generated.toLocaleString("zh-CN", { hour12: false });
+    var rows = data.cases.map(function (c, index) {
+      var status = c.status === "PASS" || c.status === "FAIL" ? c.status : "ERROR";
+      return "<article class=\"case " + status.toLowerCase() + "\">"
+        + "<div class=\"case-head\"><span class=\"number\">" + (index + 1) + "</span>"
+        + "<h2>" + htmlEscape(c.name) + "</h2>"
+        + "<span class=\"badge " + status.toLowerCase() + "\">" + status + "</span></div>"
+        + "<dl class=\"facts\">"
+        + "<div><dt>预期状态码</dt><dd>" + htmlEscape(c.expectedStatus == null ? "—" : c.expectedStatus) + "</dd></div>"
+        + "<div><dt>实际状态码</dt><dd>" + htmlEscape(c.actualStatus == null ? "—" : c.actualStatus) + "</dd></div>"
+        + "<div><dt>耗时</dt><dd>" + htmlEscape(c.durationMillis == null ? "—" : c.durationMillis + " ms") + "</dd></div>"
+        + "</dl><p class=\"explanation\">" + htmlEscape(htmlReportExplanation(c)) + "</p></article>";
+    }).join("\n");
+    return [
+      "<!DOCTYPE html>",
+      "<html lang=\"zh-CN\"><head><meta charset=\"utf-8\">",
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\">",
+      "<title>API Regression Lab · 批量回归报告</title>",
+      "<style>",
+      ":root{--bg:#f8f6f2;--surface:#fffefc;--ink:#302d29;--muted:#817a72;--line:#e5e0d7;--accent:#ba7056;--pass:#4f7a5b;--fail:#a2503f;--error:#8b6b3d}",
+      "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;line-height:1.65}",
+      "main{max-width:920px;margin:auto;padding:44px 28px 64px}.brand{color:var(--accent);font:600 13px Consolas,monospace;letter-spacing:.08em;text-transform:uppercase}",
+      "h1{margin:8px 0 4px;font-size:28px;font-weight:600}.time{margin:0;color:var(--muted);font-size:13px}",
+      ".summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:28px 0}.metric{padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}",
+      ".metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;margin-top:2px;font:600 25px Consolas,monospace}.metric.pass strong{color:var(--pass)}.metric.fail strong{color:var(--fail)}.metric.error strong{color:var(--error)}",
+      ".case{margin:0 0 14px;padding:18px 20px;border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;background:var(--surface)}.case.pass{border-left-color:var(--pass)}.case.fail{border-left-color:var(--fail)}.case.error{border-left-color:var(--error)}",
+      ".case-head{display:flex;align-items:center;gap:10px}.number{color:var(--muted);font:12px Consolas,monospace}.case h2{flex:1;min-width:0;margin:0;font-size:16px;font-weight:600;overflow-wrap:anywhere}",
+      ".badge{padding:2px 8px;border-radius:5px;background:#f1ede6;font:700 11px Consolas,monospace;letter-spacing:.05em}.badge.pass{color:var(--pass);background:#edf2ec}.badge.fail{color:var(--fail);background:#f8ece8}.badge.error{color:var(--error);background:#f6f0e3}",
+      ".facts{display:flex;gap:36px;margin:15px 0 10px}.facts div{min-width:100px}.facts dt{color:var(--muted);font-size:11px}.facts dd{margin:2px 0 0;font:13px Consolas,monospace}",
+      ".explanation{margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--line);color:#5c5248;font-size:13px;overflow-wrap:anywhere}.footer{margin-top:24px;color:var(--muted);font-size:11px;text-align:center}",
+      "@media(max-width:600px){main{padding:28px 16px 44px}.summary{grid-template-columns:repeat(2,1fr);gap:8px}.facts{gap:14px;flex-wrap:wrap}.facts div{min-width:80px}.case{padding:16px}.case h2{font-size:15px}}",
+      "</style></head><body><main>",
+      "<div class=\"brand\">API Regression Lab</div><h1>批量回归报告</h1>",
+      "<p class=\"time\">执行时间：" + htmlEscape(generatedText) + "</p>",
+      "<section class=\"summary\" aria-label=\"结果汇总\">",
+      "<div class=\"metric\"><span>总用例数</span><strong>" + htmlEscape(data.summary.total) + "</strong></div>",
+      "<div class=\"metric pass\"><span>PASS</span><strong>" + htmlEscape(data.summary.pass) + "</strong></div>",
+      "<div class=\"metric fail\"><span>FAIL</span><strong>" + htmlEscape(data.summary.fail) + "</strong></div>",
+      "<div class=\"metric error\"><span>ERROR</span><strong>" + htmlEscape(data.summary.error) + "</strong></div></section>",
+      rows,
+      "<p class=\"footer\">本报告仅包含断言结果，不包含请求凭据、请求内容、接口地址或响应正文。</p>",
+      "</main></body></html>"
+    ].join("\n");
+  }
+
+  function downloadHtmlReport() {
+    if (!lastReport || !lastReportView) return;
+    triggerDownload(buildHtmlReport(), "apilab-report.html", "text/html");
+  }
+
   function exportBatch() {
     if (batchRunning) return;
     if (!batchCases.length) { alert("测试集是空的，没有可导出的内容。"); return; }
@@ -1917,7 +2347,7 @@
 
   function importBatch() {
     if (batchRunning) return;
-    if (editingIndex >= 0) { alert("请先保存或取消当前编辑，再导入测试集。"); return; }
+    if (caseEditorOpen) { alert("请先保存或取消当前编辑，再导入测试集。"); return; }
     g("batch-file").click();
   }
 
@@ -1929,7 +2359,7 @@
     }
     var reader = new FileReader();
     reader.onload = function () {
-      if (batchRunning || editingIndex >= 0) {
+      if (batchRunning || caseEditorOpen) {
         alert("运行或编辑状态已变化，已取消导入。\n\n原测试集未做任何修改。");
         return;
       }
@@ -1947,7 +2377,7 @@
           + "，导入后需要编辑补全才能运行。";
       }
       if (!confirm(message + "\n\n确认导入吗？")) return;
-      if (batchRunning || editingIndex >= 0) {
+      if (batchRunning || caseEditorOpen) {
         alert("运行或编辑状态已变化，已取消导入。\n\n原测试集未做任何修改。");
         return;
       }
@@ -2088,17 +2518,24 @@
       expectStatus: item.expectStatus,
       expectContains: contains == null ? "" : contains.trim(),
       status: "", actualStatus: null, reasonCode: null, message: "",
-      durationMillis: null, open: false
+      durationMillis: null, responseBody: null, responseTruncated: false,
+      responseBytes: 0, open: false
     };
   }
 
+  g("workspace-tab-single").onclick = function () { switchWorkspace("single"); };
+  g("workspace-tab-batch").onclick = function () { switchWorkspace("batch"); };
+  g("single-add-case").onclick = addFromSingleResult;
   g("batch-add-current").onclick = addFromCurrent;
   g("batch-import").onclick = importBatch;
   g("batch-export").onclick = exportBatch;
   g("batch-download").onclick = downloadReport;
+  g("batch-download-html").onclick = downloadHtmlReport;
   g("batch-run").onclick = runBatch;
-  g("edit-save").onclick = saveEdit;
+  g("edit-save").onclick = saveCase;
   g("edit-cancel").onclick = cancelEdit;
+  g("case-editor-close").onclick = cancelEdit;
+  g("edit-name").addEventListener("input", function () { caseNameTouched = true; });
   g("batch-file").addEventListener("change", function (ev) {
     if (ev.target.files && ev.target.files[0]) handleImportFile(ev.target.files[0]);
     ev.target.value = "";
