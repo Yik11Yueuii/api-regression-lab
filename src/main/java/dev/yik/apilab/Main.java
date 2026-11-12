@@ -54,6 +54,14 @@ public final class Main {
     }
 
     static int execute(String[] args, PrintStream out, PrintStream err) {
+        if (webRequested(args)) {
+            try {
+                return WebServer.run(args, out);
+            } catch (IllegalArgumentException e) {
+                err.println("ERROR " + printable(e.getMessage()));
+                return EXIT_ERROR;
+            }
+        }
         try {
             SuiteCommand suite = suiteCommandFrom(args);
             if (suite != null) {
@@ -64,6 +72,19 @@ public final class Main {
             err.println("ERROR " + printable(e.getMessage()));
             return EXIT_ERROR;
         }
+    }
+
+    /**
+     * Detects the web mode flag before any CLI option is parsed so {@code --web} is never reported
+     * as an unknown argument and can never be mixed silently with another mode.
+     */
+    private static boolean webRequested(String[] args) {
+        for (String argument : args) {
+            if (argument.equals("--web")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static HttpClient newClient() {
@@ -166,6 +187,14 @@ public final class Main {
         return EXIT_PASS;
     }
 
+    /**
+     * Executes one already validated case for the local web UI. The same request and assertion
+     * logic as the CLI is used; only the output streams are redirected.
+     */
+    static CaseResult runForWeb(Options options, HttpClient client, PrintStream sink) {
+        return runCase(options, client, sink, sink);
+    }
+
     private static CaseResult runCase(Options options, HttpClient client,
                                       PrintStream out, PrintStream err) {
         int expectedStatus = options.expectedStatus();
@@ -223,7 +252,7 @@ public final class Main {
     }
 
     /** Replaces control characters so a case name cannot break the console layout. */
-    private static String printable(String value) {
+    static String printable(String value) {
         StringBuilder sanitized = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
@@ -343,8 +372,8 @@ public final class Main {
     private record SuiteCommand(Path suite, Path report) {
     }
 
-    private record CaseResult(String name, String status, Integer expectedStatus,
-                              Integer actualStatus, String reasonCode) {
+    record CaseResult(String name, String status, Integer expectedStatus,
+                      Integer actualStatus, String reasonCode) {
 
         static CaseResult error(String name, Integer expectedStatus, String reasonCode) {
             return new CaseResult(name, "ERROR", expectedStatus, null, reasonCode);
@@ -437,8 +466,8 @@ public final class Main {
         }
     }
 
-    private record Options(URI url, Method method, String bodyJson, int expectedStatus,
-                           String expectedContains, List<Header> headers, List<QueryParam> queries) {
+    record Options(URI url, Method method, String bodyJson, int expectedStatus,
+                   String expectedContains, List<Header> headers, List<QueryParam> queries) {
 
         static Options parse(String[] args) {
             URI url = null;
@@ -538,14 +567,21 @@ public final class Main {
          * message, which could quote it.
          */
         static Options fromFile(Path path) {
-            JsonNode root = readJsonObject(path, "test case file");
+            return fromJson(readJsonObject(path, "test case file"), "test case file");
+        }
+
+        /**
+         * Validates one case object. Accepting already-parsed JSON lets the local web UI reuse the
+         * exact same field rules as a test case file instead of duplicating request validation.
+         */
+        static Options fromJson(JsonNode root, String what) {
             root.fieldNames().forEachRemaining(field -> {
                 if (!CASE_FIELDS.contains(field)) {
-                    throw new IllegalArgumentException("unknown field in test case file: " + field);
+                    throw new IllegalArgumentException("unknown field in " + what + ": " + field);
                 }
             });
 
-            JsonNode urlNode = require(root, "url");
+            JsonNode urlNode = require(root, "url", what);
             if (!urlNode.isTextual()) {
                 throw new IllegalArgumentException("field 'url' must be a string");
             }
@@ -610,7 +646,7 @@ public final class Main {
                 }
             }
 
-            JsonNode statusNode = require(root, "expectStatus");
+            JsonNode statusNode = require(root, "expectStatus", what);
             if (!statusNode.isIntegralNumber() || !statusNode.canConvertToInt()) {
                 throw new IllegalArgumentException("field 'expectStatus' must be an integer");
             }
@@ -630,10 +666,10 @@ public final class Main {
             return of(url, method, bodyJson, statusNode.intValue(), expectedContains, headers, queries);
         }
 
-        private static JsonNode require(JsonNode root, String field) {
+        private static JsonNode require(JsonNode root, String field, String what) {
             JsonNode node = root.get(field);
             if (node == null) {
-                throw new IllegalArgumentException("missing required field in test case file: " + field);
+                throw new IllegalArgumentException("missing required field in " + what + ": " + field);
             }
             return node;
         }
@@ -868,13 +904,13 @@ public final class Main {
         }
     }
 
-    private enum Method {
+    enum Method {
         GET, POST
     }
 
-    private record Header(String name, String value) {
+    record Header(String name, String value) {
     }
 
-    private record QueryParam(String name, String value) {
+    record QueryParam(String name, String value) {
     }
 }

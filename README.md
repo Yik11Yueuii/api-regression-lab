@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本 v0.2.0 已完成 V1 全部功能：支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。
+一个轻量级 Java API 回归测试工具。当前版本 v0.2.0 支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。V2-01 起还提供本地 Web 页面，可在浏览器中完成单接口可视化测试，无需重复输入命令。
 
 ## 环境要求
 
@@ -40,6 +40,75 @@ mvn -v
 ```
 
 `mvn -v` 输出的 `Java version` 必须为 21，否则 `mvn clean test` 会因 `maven.compiler.release=21` 失败。
+
+## 图形界面（本地 Web UI）
+
+V2-01 起提供本地 Web 页面，用浏览器完成单接口测试。页面通过本机 HTTP 服务调用与 CLI 完全相同的请求和断言逻辑，不是另一套测试引擎。
+
+### 启动方式
+
+Windows 下双击仓库根目录的 `start-web.bat`。脚本会：
+
+1. 依次检查有效的 `JAVA_HOME`、`%USERPROFILE%\.jdks\openjdk-21.0.2` 以及 PATH 上的 `java`，只接受 Java 21；
+2. 检查 `target\api-regression-lab-0.2.0.jar` 是否存在，缺失时提示先执行 `mvn clean package`；
+3. 启动服务并自动打开默认浏览器访问 <http://127.0.0.1:8765/>。
+
+也可以在终端手动启动：
+
+```bash
+java -jar target/api-regression-lab-0.2.0.jar --web
+```
+
+启动后保持脚本窗口或终端开启，按 `Ctrl+C` 停止服务。启动失败（未找到 Java 21、JAR 不存在、端口被占用等）会打印明确错误并保留窗口，不会静默退出。
+
+### 访问范围与安全边界
+
+- 只监听 `127.0.0.1:8765`（loopback），默认不监听所有网卡，局域网内其他机器无法访问
+- `--web` 不能与其他命令行参数混用；重复提供或与其他模式混用时输出 `ERROR` 并以退出码 2 结束，原有 CLI 行为与退出码不变
+- 执行接口只接受本页面发起的请求：同时校验 `Origin` 与 `Host`，跨站网页或缺失 `Origin` 的请求返回 `403`，且不返回任何 CORS 允许头
+- 页面不写入 localStorage，不持久化 `Authorization`、`Cookie` 等敏感请求头，也不默认记录完整请求体
+- 出错时只返回简短说明，不显示 Java 异常堆栈；目标接口的响应体不会显示在页面上
+
+### 页面功能
+
+| 区域 | 说明 |
+| --- | --- |
+| Method / URL | 选择 `GET` 或 `POST`，填写绝对 http/https 地址 |
+| Params | 多组查询参数，可增删，按 UTF-8 编码后追加到 URL |
+| Headers | 多组 `名称: 值` 请求头，可增删 |
+| Body | 仅 POST 显示，填写 JSON 对象或数组；页面与后端都会校验 JSON 语法 |
+| Assertions | 预期 HTTP 状态码（100-599）与可选的响应包含文本 |
+| Result | PASS / FAIL / ERROR、预期与实际状态码、失败原因、耗时 |
+
+交互说明：
+
+- 点击「发送测试」后通过 `fetch` 提交，页面不刷新
+- 请求期间按钮禁用并显示「测试中…」，避免重复提交
+- 表单错误显示在对应输入框下方，并自动聚焦第一个错误项
+- 首次打开页面预填本地天气示例：`GET http://127.0.0.1:8080/api/weather/北京`，预期 200 且响应包含「多云」。示例指向本地模拟服务，可随时替换为任意 http/https 接口
+
+### Web 执行接口
+
+页面通过 `POST /api/run` 执行测试，请求体字段与单用例 JSON 文件一致，POST 场景额外提供字符串字段 `body`：
+
+```json
+{
+  "method": "GET",
+  "url": "http://127.0.0.1:8080/api/weather/%E5%8C%97%E4%BA%AC",
+  "headers": [],
+  "query": [],
+  "expectStatus": 200,
+  "expectContains": "多云"
+}
+```
+
+响应示例：
+
+```json
+{"status":"PASS","expectedStatus":200,"actualStatus":200,"reasonCode":null,"message":null,"durationMillis":12}
+```
+
+参数错误或非法 JSON 返回 `HTTP 400`，跨站请求返回 `HTTP 403`，响应体同样包含 `status`、`reasonCode` 与 `message`。该接口仅服务于本地页面，不承诺对外稳定。
 
 ## CLI 使用
 
@@ -310,7 +379,7 @@ Windows 路径分隔符可写成 `\\` 或直接用 `/`。
 mvn clean test
 ```
 
-测试使用 JDK 自带 `com.sun.net.httpserver.HttpServer` 在本机随机空闲端口启动模拟服务，结束后停止服务，不依赖公网或公司内部服务。除直接调用入口方法的单元测试外，还包含以子进程方式启动 CLI 的集成测试，用于校验真实的进程退出码 0 / 1 / 2。
+测试使用 JDK 自带 `com.sun.net.httpserver.HttpServer` 在本机随机空闲端口启动模拟服务，结束后停止服务，不依赖公网或公司内部服务。除直接调用入口方法的单元测试外，还包含以子进程方式启动 CLI 的集成测试，用于校验真实的进程退出码 0 / 1 / 2，以及覆盖 Web 模式的测试（loopback 绑定、Origin 拒绝、GET/POST 执行、参数错误、网络错误与敏感信息不回显）。
 
 ## 已实现功能
 
@@ -334,12 +403,17 @@ mvn clean test
 - 控制台 `CASE` 名称与错误信息中的控制字符会被替换，避免破坏日志格式
 - Maven Shade Plugin 打包可自包含运行的 JAR（包含 Jackson）
 - GitHub Actions CI（Ubuntu + Java 21）自动执行测试、打包与 JAR 校验
+- `--web` 启动本地 Web 页面（`com.sun.net.httpserver.HttpServer`，仅监听 `127.0.0.1:8765`），复用 CLI 请求与断言逻辑
+- Web 页面支持 GET/POST、Params、Headers、JSON Body、状态码与响应包含断言，结果展示 PASS/FAIL/ERROR
+- Web 执行接口校验 `Origin` 与 `Host`，拒绝跨站调用；错误只返回简短说明，不显示异常堆栈
+- `start-web.bat` 双击启动，自动检测 Java 21、检查 JAR 并打开浏览器
 
 ## 尚未实现功能
 
 - PUT、DELETE 等其他 HTTP 方法
-- JSON 语法校验与 JSON 字段级断言
+- JSON 字段级断言（目前只支持状态码与响应文本包含）
 - 并发执行、失败重试与用例间变量关联
+- 批量测试与报告管理页面（Web 目前只支持单接口测试）
+- Web 页面中的用例保存、历史结果比较与取消进行中的请求
 - HTML 测试报告
 - 历史测试结果比较
-- Web GUI

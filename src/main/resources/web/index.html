@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Regression Lab · 本地接口测试</title>
+<style>
+  :root {
+    --bg: #f7f5ff;
+    --surface: #ffffff;
+    --ink: #221b3a;
+    --muted: #6f6789;
+    --line: #e9e3fa;
+    --brand: #7a5af8;
+    --brand-dark: #6847ea;
+    --brand-weak: #f1ecff;
+    --pass: #0f8f6b;
+    --pass-bg: #e6f8f0;
+    --fail: #cf3a5c;
+    --fail-bg: #fdecf0;
+    --warn: #a96a00;
+    --warn-bg: #fff3e0;
+    --radius: 18px;
+    --shadow: 0 14px 40px rgba(84, 56, 170, 0.09);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background:
+      radial-gradient(900px 520px at 8% -10%, #ece4ff 0%, rgba(236, 228, 255, 0) 60%),
+      radial-gradient(760px 480px at 100% 0%, #e8f0ff 0%, rgba(232, 240, 255, 0) 55%),
+      var(--bg);
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system,
+      "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 30px 24px 52px; }
+
+  .hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+
+  .brand { display: flex; align-items: center; gap: 14px; }
+
+  .logo {
+    width: 46px; height: 46px;
+    display: grid; place-items: center;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #8b6cff, #a98bff);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: .5px;
+    box-shadow: 0 8px 20px rgba(122, 90, 248, .35);
+  }
+
+  h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+  .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+    box-shadow: 0 6px 16px rgba(84, 56, 170, .05);
+  }
+
+  .pill::before {
+    content: "";
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--pass);
+    box-shadow: 0 0 0 4px rgba(15, 143, 107, .12);
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
+    gap: 22px;
+    align-items: start;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px;
+  }
+
+  .section + .section { margin-top: 22px; padding-top: 20px; border-top: 1px dashed var(--line); }
+
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; margin-bottom: 12px;
+  }
+
+  h2 { margin: 0; font-size: 15px; letter-spacing: .2px; }
+  .hint { color: var(--muted); font-size: 12px; }
+
+  .request-row {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+  }
+
+  .select, input[type="text"], input[type="number"], textarea {
+    width: 100%;
+    padding: 11px 13px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fcfbff;
+    color: var(--ink);
+    font: inherit;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+
+  .select { cursor: pointer; font-weight: 600; color: var(--brand-dark); }
+
+  input:focus, textarea:focus, .select:focus {
+    border-color: #b9a4ff;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(122, 90, 248, .14);
+  }
+
+  textarea {
+    min-height: 132px;
+    resize: vertical;
+    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 12px;
+  }
+
+  .primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-width: 116px;
+    padding: 11px 20px;
+    background: linear-gradient(135deg, var(--brand), #9a7bff);
+    color: #fff;
+    font-weight: 600;
+    letter-spacing: .4px;
+    box-shadow: 0 10px 22px rgba(122, 90, 248, .28);
+    transition: transform .12s, box-shadow .12s, opacity .12s;
+  }
+
+  .primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(122, 90, 248, .34); }
+  .primary:disabled { opacity: .68; cursor: progress; }
+
+  .spinner {
+    display: none;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255, 255, 255, .45);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+
+  .primary.loading .spinner { display: inline-block; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .pairs { display: flex; flex-direction: column; gap: 8px; }
+
+  .pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 34px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .pair input { padding: 9px 12px; }
+
+  .remove {
+    width: 34px; height: 38px;
+    background: var(--brand-weak);
+    color: var(--brand-dark);
+    font-size: 18px;
+    line-height: 1;
+    transition: background .12s, color .12s;
+  }
+
+  .remove:hover { background: #e6dcff; color: #5033c8; }
+
+  .link-btn {
+    background: none;
+    color: var(--brand-dark);
+    font-size: 12px;
+    padding: 4px 2px;
+    font-weight: 600;
+  }
+
+  .link-btn:hover { text-decoration: underline; }
+
+  .assert-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; }
+
+  .field-label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+
+  .field-error {
+    margin: 5px 2px 0;
+    color: var(--fail);
+    font-size: 12px;
+    min-height: 0;
+    display: none;
+  }
+
+  .field-error.visible { display: block; }
+
+  .note {
+    margin: 10px 0 0;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: #faf8ff;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .result-card { position: sticky; top: 24px; }
+
+  .result-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 1px;
+  }
+
+  .badge.pass { background: var(--pass-bg); color: var(--pass); }
+  .badge.fail { background: var(--fail-bg); color: var(--fail); }
+  .badge.error { background: var(--warn-bg); color: var(--warn); }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 18px 0 6px;
+  }
+
+  .status-cell {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #fbfaff;
+    border: 1px solid var(--line);
+  }
+
+  .status-cell span { display: block; color: var(--muted); font-size: 12px; }
+  .status-cell strong { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+
+  .result-message {
+    margin: 12px 0 0;
+    padding: 11px 13px;
+    border-radius: 11px;
+    background: #faf8ff;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 13px;
+    word-break: break-word;
+  }
+
+  .result-message:empty { display: none; }
+
+  .empty { padding: 34px 12px; text-align: center; color: var(--muted); }
+  .empty-mark {
+    width: 54px; height: 54px;
+    margin: 0 auto 14px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: var(--brand-weak);
+    color: var(--brand-dark);
+    font-size: 22px;
+  }
+  .empty p { margin: 4px 0; }
+
+  .meta { margin-top: 14px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 10px; }
+
+  footer { margin-top: 26px; text-align: center; color: var(--muted); font-size: 12px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  @media (max-width: 940px) {
+    .workspace { grid-template-columns: minmax(0, 1fr); }
+    .result-card { position: static; }
+  }
+
+  @media (max-width: 640px) {
+    .page { padding: 20px 14px 40px; }
+    .request-row { grid-template-columns: minmax(0, 1fr); }
+    .primary { width: 100%; }
+    .assert-grid { grid-template-columns: minmax(0, 1fr); }
+    .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px; }
+    .card { padding: 18px; }
+    h1 { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="brand">
+      <div class="logo">AR</div>
+      <div>
+        <h1>API Regression Lab</h1>
+        <p class="sub">单接口可视化测试 · 复用本地 CLI 测试引擎</p>
+      </div>
+    </div>
+    <span class="pill">仅监听 127.0.0.1</span>
+  </header>
+
+  <div class="workspace">
+    <form id="test-form" class="card" novalidate autocomplete="off">
+      <section class="section">
+        <div class="section-head">
+          <h2>请求</h2>
+          <button type="button" class="link-btn" id="load-example">载入本地天气示例</button>
+        </div>
+        <div class="request-row">
+          <label class="sr-only" for="method">HTTP 方法</label>
+          <select id="method" class="select">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+          </select>
+          <div>
+            <label class="sr-only" for="url">接口 URL</label>
+            <input id="url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8080/api/weather/北京">
+            <p class="field-error" id="error-url"></p>
+          </div>
+          <button type="submit" class="primary" id="send">
+            <span class="label">发送测试</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="note">示例指向本地模拟服务 <code>127.0.0.1:8080</code>（需先启动），也可替换为任意 http/https 接口。</p>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Params 查询参数</h2>
+          <button type="button" class="link-btn" data-add="params">+ 添加参数</button>
+        </div>
+        <div class="pairs" id="params"></div>
+        <p class="field-error" id="error-params"></p>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Headers 请求头</h2>
+          <button type="button" class="link-btn" data-add="headers">+ 添加请求头</button>
+        </div>
+        <div class="pairs" id="headers"></div>
+        <p class="field-error" id="error-headers"></p>
+        <p class="note">Authorization、Cookie 等敏感请求头只用于本次请求，页面不会保存。</p>
+      </section>
+
+      <section class="section" id="body-section" hidden>
+        <div class="section-head">
+          <h2>Body · JSON</h2>
+          <span class="hint">仅 POST 使用</span>
+        </div>
+        <textarea id="body" spellcheck="false" placeholder='{
+  "name": "测试"
+}'></textarea>
+        <p class="field-error" id="error-body"></p>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Assertions 断言</h2>
+          <span class="hint">两项都会校验</span>
+        </div>
+        <div class="assert-grid">
+          <div>
+            <label class="field-label" for="expect-status">预期 HTTP 状态码</label>
+            <input id="expect-status" type="number" min="100" max="599" step="1" value="200">
+          </div>
+          <div>
+            <label class="field-label" for="expect-contains">预期响应包含文本</label>
+            <input id="expect-contains" type="text" placeholder="例如：多云（留空则不校验）">
+          </div>
+        </div>
+        <p class="field-error" id="error-status"></p>
+      </section>
+    </form>
+
+    <aside class="card result-card">
+      <div class="section-head">
+        <h2>测试结果</h2>
+        <span class="hint" id="result-time"></span>
+      </div>
+      <div id="result-empty" class="empty">
+        <div class="empty-mark">?</div>
+        <p>尚未运行测试</p>
+        <p class="muted">填写接口信息后点击「发送测试」</p>
+      </div>
+      <div id="result-body" hidden aria-live="polite">
+        <div class="result-top">
+          <span id="result-status" class="badge pass">PASS</span>
+          <span class="hint" id="result-duration"></span>
+        </div>
+        <div class="status-grid">
+          <div class="status-cell">
+            <span>预期状态码</span>
+            <strong id="result-expected">—</strong>
+          </div>
+          <div class="status-cell">
+            <span>实际状态码</span>
+            <strong id="result-actual">—</strong>
+          </div>
+        </div>
+        <p class="result-message" id="result-message"></p>
+        <div class="meta">
+          <span id="result-reason"></span>
+          <span id="result-clock"></span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer>测试结果仅保存在当前页面内存中，不会写入本地文件。</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var EXAMPLE = {
+    method: "GET",
+    url: "http://127.0.0.1:8080/api/weather/北京",
+    status: "200",
+    contains: "多云"
+  };
+
+  var el = {
+    form: document.getElementById("test-form"),
+    method: document.getElementById("method"),
+    url: document.getElementById("url"),
+    bodySection: document.getElementById("body-section"),
+    body: document.getElementById("body"),
+    expectStatus: document.getElementById("expect-status"),
+    expectContains: document.getElementById("expect-contains"),
+    params: document.getElementById("params"),
+    headers: document.getElementById("headers"),
+    send: document.getElementById("send"),
+    sendLabel: document.querySelector("#send .label"),
+    resultEmpty: document.getElementById("result-empty"),
+    resultBody: document.getElementById("result-body"),
+    resultStatus: document.getElementById("result-status"),
+    resultExpected: document.getElementById("result-expected"),
+    resultActual: document.getElementById("result-actual"),
+    resultDuration: document.getElementById("result-duration"),
+    resultMessage: document.getElementById("result-message"),
+    resultReason: document.getElementById("result-reason"),
+    resultTime: document.getElementById("result-time"),
+    resultClock: document.getElementById("result-clock")
+  };
+
+  var running = false;
+
+  function setError(id, message) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.toggle("visible", Boolean(message));
+  }
+
+  function clearErrors() {
+    ["error-url", "error-status", "error-body", "error-params", "error-headers"].forEach(function (id) {
+      setError(id, "");
+    });
+  }
+
+  function addPair(container, kind) {
+    var row = document.createElement("div");
+    row.className = "pair";
+
+    var nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "pair-name";
+    nameInput.spellcheck = false;
+    nameInput.placeholder = kind === "headers" ? "请求头名称，例如 X-Token" : "参数名，例如 city";
+
+    var valueInput = document.createElement("input");
+    valueInput.type = "text";
+    valueInput.className = "pair-value";
+    valueInput.spellcheck = false;
+    valueInput.placeholder = kind === "headers" ? "请求头的值" : "参数值，例如 北京";
+
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove";
+    remove.title = "删除这一行";
+    remove.setAttribute("aria-label", "删除这一行");
+    remove.textContent = "×";
+    remove.addEventListener("click", function () {
+      row.remove();
+      if (!container.children.length) addPair(container, kind);
+    });
+
+    row.appendChild(nameInput);
+    row.appendChild(valueInput);
+    row.appendChild(remove);
+    container.appendChild(row);
+  }
+
+  function resetPairs() {
+    el.params.textContent = "";
+    el.headers.textContent = "";
+    addPair(el.params, "params");
+    addPair(el.headers, "headers");
+  }
+
+  function syncMethod() {
+    var isPost = el.method.value === "POST";
+    el.bodySection.hidden = !isPost;
+    if (!isPost) setError("error-body", "");
+  }
+
+  function readPairs(container, kind) {
+    var values = [];
+    var rows = container.querySelectorAll(".pair");
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i].querySelector(".pair-name").value.trim();
+      var value = rows[i].querySelector(".pair-value").value;
+      if (!name && !value.trim()) continue;
+      if (kind === "headers") {
+        if (!name) throw new Error("请求头名称不能为空");
+        if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) {
+          throw new Error("请求头名称不合法：" + name);
+        }
+        if (/[\r\n]/.test(value)) throw new Error("请求头值不能包含换行");
+        values.push(name + ": " + value.trim());
+      } else {
+        if (!name) throw new Error("查询参数名称不能为空");
+        if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) {
+          throw new Error("查询参数不能包含换行");
+        }
+        values.push(name + "=" + value);
+      }
+    }
+    return values;
+  }
+
+  function collect() {
+    clearErrors();
+    var invalid = [];
+
+    var url = el.url.value.trim();
+    var normalizedUrl = url;
+    if (!url) {
+      setError("error-url", "请填写接口 URL");
+      invalid.push(el.url);
+    } else if (!/^https?:\/\//i.test(url)) {
+      setError("error-url", "URL 需要以 http:// 或 https:// 开头");
+      invalid.push(el.url);
+    } else {
+      try {
+        normalizedUrl = new URL(url).href;
+      } catch (e) {
+        setError("error-url", "URL 格式不正确");
+        invalid.push(el.url);
+      }
+    }
+
+    var statusText = el.expectStatus.value.trim();
+    var expectStatus = null;
+    if (!/^\d+$/.test(statusText)) {
+      setError("error-status", "请填写 100-599 之间的整数状态码");
+      invalid.push(el.expectStatus);
+    } else {
+      var parsedStatus = Number(statusText);
+      if (parsedStatus < 100 || parsedStatus > 599) {
+        setError("error-status", "状态码需要在 100-599 之间");
+        invalid.push(el.expectStatus);
+      } else {
+        expectStatus = parsedStatus;
+      }
+    }
+
+    var params = [];
+    var headers = [];
+    try {
+      params = readPairs(el.params, "params");
+    } catch (e) {
+      setError("error-params", e.message);
+      invalid.push(el.params.querySelector("input"));
+    }
+    try {
+      headers = readPairs(el.headers, "headers");
+    } catch (e) {
+      setError("error-headers", e.message);
+      invalid.push(el.headers.querySelector("input"));
+    }
+
+    var bodyText = null;
+    if (el.method.value === "POST") {
+      bodyText = el.body.value;
+      if (!bodyText.trim()) {
+        setError("error-body", "POST 请求需要 JSON 请求体");
+        invalid.push(el.body);
+      } else {
+        try {
+          var parsedBody = JSON.parse(bodyText);
+          if (parsedBody === null || typeof parsedBody !== "object") {
+            setError("error-body", "请求体必须是 JSON 对象或数组");
+            invalid.push(el.body);
+          }
+        } catch (e) {
+          setError("error-body", "请求体不是合法的 JSON");
+          invalid.push(el.body);
+        }
+      }
+    }
+
+    if (invalid.length) {
+      invalid[0].focus();
+      return null;
+    }
+
+    var payload = {
+      method: el.method.value,
+      url: normalizedUrl,
+      headers: headers,
+      query: params,
+      expectStatus: expectStatus
+    };
+    var contains = el.expectContains.value.trim();
+    if (contains) payload.expectContains = contains;
+    if (bodyText !== null) payload.body = bodyText;
+    return payload;
+  }
+
+  function setLoading(loading) {
+    running = loading;
+    el.send.disabled = loading;
+    el.send.classList.toggle("loading", loading);
+    el.sendLabel.textContent = loading ? "测试中…" : "发送测试";
+  }
+
+  function showResult(data) {
+    var status = data && data.status ? String(data.status).toUpperCase() : "ERROR";
+    var statusClass = status === "PASS" ? "pass" : (status === "FAIL" ? "fail" : "error");
+
+    el.resultEmpty.hidden = true;
+    el.resultBody.hidden = false;
+    el.resultStatus.textContent = status;
+    el.resultStatus.className = "badge " + statusClass;
+    el.resultExpected.textContent = data && data.expectedStatus != null ? data.expectedStatus : "—";
+    el.resultActual.textContent = data && data.actualStatus != null ? data.actualStatus : "—";
+    el.resultDuration.textContent = data && data.durationMillis != null
+      ? "耗时 " + data.durationMillis + " ms" : "";
+    el.resultReason.textContent = data && data.reasonCode ? "原因码：" + data.reasonCode : "";
+    el.resultClock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    el.resultTime.textContent = "最新一次";
+
+    var message = data && data.message ? data.message : "";
+    if (!message && status === "PASS") message = "状态码与响应内容均符合预期";
+    el.resultMessage.textContent = message;
+  }
+
+  async function submitTest(event) {
+    event.preventDefault();
+    if (running) return;
+
+    var payload = collect();
+    if (!payload) return;
+
+    setLoading(true);
+    try {
+      var response = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      var data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        throw new Error("本地测试服务返回了无法解析的响应");
+      }
+      showResult(data);
+    } catch (e) {
+      showResult({
+        status: "ERROR",
+        expectedStatus: null,
+        actualStatus: null,
+        reasonCode: "NETWORK_ERROR",
+        message: e && e.message ? e.message : "无法连接本地测试服务"
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function loadExample() {
+    el.method.value = EXAMPLE.method;
+    el.url.value = EXAMPLE.url;
+    el.expectStatus.value = EXAMPLE.status;
+    el.expectContains.value = EXAMPLE.contains;
+    el.body.value = "";
+    resetPairs();
+    syncMethod();
+    clearErrors();
+    el.url.focus();
+    el.url.select();
+  }
+
+  el.form.addEventListener("submit", submitTest);
+  el.method.addEventListener("change", syncMethod);
+  el.url.addEventListener("input", function () { setError("error-url", ""); });
+  el.expectStatus.addEventListener("input", function () { setError("error-status", ""); });
+  el.body.addEventListener("input", function () { setError("error-body", ""); });
+  document.getElementById("load-example").addEventListener("click", loadExample);
+  document.querySelectorAll("[data-add]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      addPair(document.getElementById(button.dataset.add), button.dataset.add);
+    });
+  });
+
+  resetPairs();
+  syncMethod();
+  loadExample();
+})();
+</script>
+</body>
+</html>
