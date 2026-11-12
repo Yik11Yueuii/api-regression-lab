@@ -195,6 +195,30 @@ public final class Main {
         return runCase(options, client, sink, sink);
     }
 
+    /**
+     * Runs the given cases for the local web batch runner. Same engine as the CLI suite: every
+     * case keeps going after FAIL or ERROR and each result is returned separately so the web UI
+     * can render per-case state, duration and failure reason. Names are sanitized here so the web
+     * report never leaks file paths either.
+     */
+    static List<CaseResult> runSuiteForWeb(List<WebSuiteCase> cases, HttpClient client,
+                                           PrintStream sink) {
+        List<CaseResult> results = new ArrayList<>();
+        for (WebSuiteCase entry : cases) {
+            sink.println("CASE " + entry.displayName());
+            CaseResult result;
+            try {
+                result = runCase(entry.options(), client, sink, sink)
+                        .named(entry.displayName());
+            } catch (IllegalArgumentException e) {
+                sink.println("ERROR " + printable(e.getMessage()));
+                result = CaseResult.error(entry.displayName(), null, "INVALID_CASE");
+            }
+            results.add(result);
+        }
+        return List.copyOf(results);
+    }
+
     private static CaseResult runCase(Options options, HttpClient client,
                                       PrintStream out, PrintStream err) {
         int expectedStatus = options.expectedStatus();
@@ -468,6 +492,31 @@ public final class Main {
             } catch (InvalidPathException e) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * One entry of a web-side batch run. Unlike {@link SuiteCase}, the options are already parsed
+     * in memory (the browser sends them directly) so this record just pairs a sanitized name with
+     * a validated {@link Options} instance.
+     */
+    record WebSuiteCase(String displayName, Options options) {
+
+        static WebSuiteCase of(String name, Options options) {
+            String clean = name == null ? "" : name.trim();
+            if (clean.isEmpty()) {
+                clean = caseName(options);
+            }
+            return new WebSuiteCase(printable(clean), options);
+        }
+
+        private static String caseName(Options options) {
+            String uri = options.requestUri().toString();
+            int slash = uri.lastIndexOf('/');
+            int query = uri.indexOf('?');
+            int end = query < 0 ? uri.length() : query;
+            String lastSegment = slash < 0 ? uri : uri.substring(slash + 1, end);
+            return lastSegment.isEmpty() ? uri.substring(0, Math.min(uri.length(), 24)) : lastSegment;
         }
     }
 

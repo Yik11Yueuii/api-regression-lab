@@ -1,6 +1,6 @@
 # API Regression Lab
 
-一个轻量级 Java API 回归测试工具。当前版本 v0.2.0 支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。V2-01 起还提供本地 Web 页面，可在浏览器中完成单接口可视化测试，无需重复输入命令。
+一个轻量级 Java API 回归测试工具。当前版本 v0.2.0 支持发送单个 GET 或 POST 请求，可附带自定义请求头、查询参数与 JSON 请求体；可从本地 JSON 文件读取单个测试用例；也可通过 suite 清单文件顺序批量执行多个用例，输出汇总并以 JSON 报告记录每次执行结果；仓库内置 GitHub Actions CI。V2-01 起提供本地 Web 页面，可在浏览器中完成单接口可视化测试，无需重复输入命令。V2-02 起新增 Web 测试集工作区，用户可在浏览器内创建、命名、排序、编辑、删除多个用例，一键批量执行并下载 JSON 报告。
 
 ## 环境要求
 
@@ -117,6 +117,88 @@ java -jar target/api-regression-lab-0.2.0.jar --web
 `responseBody` 为目标的实际响应文本，仅供页面预览：`responseBytes` 是完整响应的 UTF-8 字节数，超过 64 KB 时 `responseTruncated` 为 `true` 且 `responseBody` 只保留前 64 KB；请求未完成时 `responseBody` 为 `null`。该字段不写入测试报告，也不影响 CLI 输出格式。
 
 参数错误或非法 JSON 返回 `HTTP 400`，跨站请求返回 `HTTP 403`，响应体同样包含 `status`、`reasonCode` 与 `message`。该接口仅服务于本地页面，不承诺对外稳定。
+
+### Web 测试集（V2-02）
+
+Web 页面内置独立的「测试集」工作区，无需终端即可创建、保存、导入和批量执行多个用例。页面通过 `POST /api/batch` 一次提交所有用例，后端复用 CLI 完全相同的请求、断言与汇总逻辑，不是另一套测试引擎。
+
+#### 页面操作
+
+- 在单接口表单中填写好 URL、方法、参数、断言后，点击「加入测试集」即可把当前配置保存为一个命名用例
+- 测试集中的每个用例可单独编辑、删除、上下移动调整执行顺序
+- 支持「导出…」把当前测试集下载为 JSON 文件，或「导入…」从之前导出的文件恢复
+- 点击「运行全部」后按顺序执行，逐项展示 PASS / FAIL / ERROR 状态码与耗时
+- 完成后显示汇总（总数、PASS、FAIL、ERROR），并可展开查看每个用例的实际状态码与失败原因
+- 「下载报告」生成一份浏览器 JSON 报告，结构与 CLI 报告 v1 完全一致
+
+#### Web 测试集 JSON 格式（单文件，可导入/导出）
+
+```json
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "北京天气",
+      "method": "GET",
+      "url": "http://127.0.0.1:8080/api/weather/%E5%8C%97%E4%BA%AC",
+      "headers": ["Accept: application/json"],
+      "query": ["unit=c"],
+      "expectStatus": 200,
+      "expectContains": "多云"
+    },
+    {
+      "name": "创建用户",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/api/users",
+      "headers": ["Content-Type: application/json"],
+      "body": "{\"name\":\"张三\"}",
+      "expectStatus": 201,
+      "expectContains": "id"
+    }
+  ]
+}
+```
+
+字段与单用例 JSON 文件（`--file`）高度相似，但有几个区别：
+
+| 区别点 | Web 测试集 | CLI 单用例文件 | CLI suite 清单 |
+| --- | --- | --- | --- |
+| 顶层结构 | `{version, cases[]}` 或纯数组 `[{...}]` | 单个 `{...}` | `{cases: [字符串]}` |
+| POST 请求体字段 | `body`（字符串，直接 JSON） | `bodyJson`（JSON 对象或数组） | 从外部文件读取 |
+| 用例名称 | 必须有 `name` | 无名称字段 | 文件名即为名称 |
+| 用例数量上限 | 20 个 | 单个 | 无硬编码上限 |
+| 敏感头处理 | 导出时自动脱敏为 `***` | 无导出场景 | 无 |
+
+**重要**：Web 测试集 JSON 与 CLI `suite.json` 是**不同格式**。Web 的 `cases` 是内联对象数组（每个对象完整定义一个用例），而 CLI 的 `suite.json` 的 `cases` 是相对路径字符串数组（每个字符串指向外部单用例文件）。两者**不兼容**，不能直接混用。
+
+#### 安全与数据边界
+
+- 测试集数据保存在浏览器 `sessionStorage` 中，关闭标签页后自动清除，不写入持久化存储
+- 导出时会自动脱敏 `Authorization`、`Cookie`、`Set-Cookie`、`Proxy-Authorization` 请求头的值为 `***`，并在页面弹出确认提示
+- 批量报告（`report` 字段）**不包含**任何响应体、请求头值或请求体，结构与 CLI 报告 v1 完全相同
+- 详细响应内容（`responseBody`）仅在 Web 运行时返回，用于页面预览，不写入报告、不打印到后端日志
+- `/api/batch` 与 `/api/run` 共享相同的安全限制：只接受 loopback Origin、校验 `Origin` 与 `Host`、拒绝跨站请求
+- 最多接受 20 个用例，超过时返回 `HTTP 400`；空集、未知字段、字段类型错误同样返回 `HTTP 400`
+- 单个用例 FAIL 或 ERROR 后继续执行后续用例，不会中断整个批量执行
+- POST 用例只在用户明确点击「运行全部」时发送，页面加载后不会自动执行
+
+#### 批量报告格式
+
+批量执行完成后，响应体包含一个 `report` 字段，结构与 CLI 报告 v1 完全相同（不包含 `responseBody`、不包含请求凭据）：
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-11-12T04:19:27.405942900Z",
+  "summary": { "total": 3, "pass": 2, "fail": 1, "error": 0 },
+  "cases": [
+    { "name": "北京天气", "status": "PASS", "expectedStatus": 200, "actualStatus": 200, "reasonCode": null },
+    { "name": "创建用户", "status": "FAIL", "expectedStatus": 201, "actualStatus": 200, "reasonCode": "STATUS_MISMATCH" }
+  ]
+}
+```
+
+原因代码语义与 CLI 完全一致，见上文「JSON 测试报告」章节。
 
 ## CLI 使用
 
@@ -415,13 +497,17 @@ mvn clean test
 - Web 页面支持 GET/POST、Params、Headers、JSON Body、状态码与响应包含断言，结果展示 PASS/FAIL/ERROR
 - Web 执行接口校验 `Origin` 与 `Host`，拒绝跨站调用；错误只返回简短说明，不显示异常堆栈
 - `start-web.bat` 双击启动，自动检测 Java 21、检查 JAR 并打开浏览器
+- Web 测试集工作区（V2-02）：创建、命名、排序、编辑、删除多个用例，一键批量执行
+- Web 测试集导入/导出（单文件 JSON），与 CLI suite.json 格式不同且明确区分
+- 批量执行接口 `POST /api/batch`，复用 CLI 请求/断言引擎，逐用例继续
+- 批量运行报告沿用 CLI v1 结构，不含 responseBody/请求头/请求体
+- 敏感请求头导出时自动脱敏为 `***`（Authorization、Cookie、Set-Cookie、Proxy-Authorization）
+- 批量接口安全限制：loopback Origin、最多 20 个用例、拒绝空集/未知字段
 
 ## 尚未实现功能
 
 - PUT、DELETE 等其他 HTTP 方法
 - JSON 字段级断言（目前只支持状态码与响应文本包含）
 - 并发执行、失败重试与用例间变量关联
-- 批量测试与报告管理页面（Web 目前只支持单接口测试）
-- Web 页面中的用例保存、历史结果比较与取消进行中的请求
-- HTML 测试报告
+- HTML 测试报告（目前只有 JSON）
 - 历史测试结果比较
