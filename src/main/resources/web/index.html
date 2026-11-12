@@ -1739,6 +1739,27 @@
     return "";
   }
 
+  /* Privacy-safe explanation for exported HTML reports. Must never echo
+     the raw expected-contains text because assertion content may hold
+     tokens, keys, or other secrets. The inline batch UI keeps the full
+     friendlyResult above for day-to-day debugging. */
+  function htmlReportExplanation(c) {
+    var actual = c.actualStatus == null ? "—" : c.actualStatus;
+    if (c.status === "PASS") {
+      return "HTTP 状态码为 " + actual + "，符合预期"
+        + (c.expectContains ? "，响应内容满足包含文本断言。" : "。");
+    }
+    if (c.reasonCode === "BODY_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，符合预期，但响应内容未满足包含文本断言。";
+    }
+    if (c.reasonCode === "STATUS_MISMATCH") {
+      return "HTTP 状态码为 " + actual + "，预期为 " + c.expectStatus + "。";
+    }
+    if (c.status === "FAIL") return "响应未满足预期断言。";
+    if (c.status === "ERROR") return "请求未能完成。";
+    return "";
+  }
+
   function renderBatchCases() {
     var root = g("batch-cases");
     root.innerHTML = "";
@@ -2058,6 +2079,7 @@
   }
 
   function addFromSingleResult() {
+    if (batchRunning) { alert("批量测试正在执行，请等本次运行完成后再从单接口结果创建用例。"); return; }
     if (!singleResultPayload || caseEditorOpen) return;
     if (!confirm("使用本次结果对应的请求配置创建批量用例吗？\n\n下一步会显示完整请求和当前断言，确认保存后才会加入测试集。")) return;
     switchWorkspace("batch");
@@ -2111,6 +2133,7 @@
     lastReport = null;
     lastReportView = null;
     batchProgress = "";
+    g("single-add-case").disabled = true;
     batchCases.forEach(resetCaseResult);
     renderBatch();
 
@@ -2167,6 +2190,7 @@
     } finally {
       batchRunning = false;
       batchProgress = "";
+      g("single-add-case").disabled = !singleResultPayload;
       renderBatch();
     }
   }
@@ -2262,7 +2286,7 @@
         + "<div><dt>预期状态码</dt><dd>" + htmlEscape(c.expectedStatus == null ? "—" : c.expectedStatus) + "</dd></div>"
         + "<div><dt>实际状态码</dt><dd>" + htmlEscape(c.actualStatus == null ? "—" : c.actualStatus) + "</dd></div>"
         + "<div><dt>耗时</dt><dd>" + htmlEscape(c.durationMillis == null ? "—" : c.durationMillis + " ms") + "</dd></div>"
-        + "</dl><p class=\"explanation\">" + htmlEscape(c.friendlyMessage) + "</p></article>";
+        + "</dl><p class=\"explanation\">" + htmlEscape(htmlReportExplanation(c)) + "</p></article>";
     }).join("\n");
     return [
       "<!DOCTYPE html>",

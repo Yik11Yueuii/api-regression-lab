@@ -107,6 +107,34 @@ class WebServerTest {
         assertTrue(response.body().contains("id=\"case-assertion-review\""));
         assertTrue(response.body().contains("id=\"batch-download-html\""));
         assertTrue(response.body().contains("function buildHtmlReport()"));
+        assertTrue(response.body().contains("function htmlReportExplanation(c)"),
+                "HTML report must have a privacy-safe explanation function");
+        assertTrue(response.body().contains("htmlReportExplanation(c)")
+                        && !response.body().contains("c.friendlyMessage"),
+                "HTML report explanation must not echo friendlyMessage (which may contain raw expectContains)");
+    }
+
+    @Test
+    void htmlReportExplanationDoesNotEchoRawAssertionText() throws Exception {
+        HttpResponse<String> response = client.send(
+                HttpRequest.newBuilder(URI.create(webBase + "/")).GET().build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        String body = response.body();
+
+        int start = body.indexOf("function htmlReportExplanation(c)");
+        assertTrue(start >= 0, "privacy-safe explanation function must be present");
+
+        // Walk forward to the next top-level function declaration at the
+        // same indentation level. Anything between start and that boundary
+        // belongs to htmlReportExplanation.
+        int end = body.indexOf("\n  function ", start);
+        assertTrue(end > start, "htmlReportExplanation function must close properly");
+        String explanationFunc = body.substring(start, end);
+
+        assertFalse(explanationFunc.contains("\" + c.expectContains + \""),
+                "htmlReportExplanation must not concatenate raw expectContains text");
+        assertTrue(explanationFunc.contains("包含文本断言"),
+                "explanation should still communicate that a text assertion was expected");
     }
 
     @Test
