@@ -69,6 +69,8 @@ class WebServerTest {
             countedHits.incrementAndGet();
             respond(exchange, 200);
         });
+        mock.createContext("/large", exchange -> respond(exchange, 200, "x".repeat(100_000)));
+        mock.createContext("/large-chinese", exchange -> respond(exchange, 200, "云".repeat(30_000)));
         mock.start();
         mockBase = "http://127.0.0.1:" + mock.getAddress().getPort();
 
@@ -260,6 +262,55 @@ class WebServerTest {
     }
 
     @Test
+    void responsePreviewShowsTargetBody() throws Exception {
+        ObjectNode payload = casePayload("/body", 200);
+
+        JsonNode result = send(payload);
+
+        assertEquals("PASS", result.get("status").asText());
+        assertTrue(result.get("responseBody").asText().contains("多云"), result.toString());
+        assertFalse(result.get("responseTruncated").asBoolean());
+        assertTrue(result.get("responseBytes").asInt() > 0);
+    }
+
+    @Test
+    void jsonResponsePreviewIsReturnedAsPlainText() throws Exception {
+        ObjectNode payload = casePayload("/post-created", 201);
+        payload.put("method", "POST");
+        payload.put("body", "{\"name\":\"测试\"}");
+
+        JsonNode result = send(payload);
+
+        assertEquals("PASS", result.get("status").asText());
+        assertEquals("{\"id\":1}", result.get("responseBody").asText());
+    }
+
+    @Test
+    void longResponseIsTruncated() throws Exception {
+        ObjectNode payload = casePayload("/large", 200);
+
+        JsonNode result = send(payload);
+
+        assertEquals("PASS", result.get("status").asText());
+        assertTrue(result.get("responseTruncated").asBoolean());
+        assertEquals(100_000, result.get("responseBytes").asInt());
+        assertEquals(64 * 1024, result.get("responseBody").asText().length());
+    }
+
+    @Test
+    void truncationKeepsMultiByteCharactersIntact() throws Exception {
+        ObjectNode payload = casePayload("/large-chinese", 200);
+
+        JsonNode result = send(payload);
+
+        String preview = result.get("responseBody").asText();
+        assertTrue(result.get("responseTruncated").asBoolean());
+        assertEquals(30_000 * 3, result.get("responseBytes").asInt());
+        assertEquals(64 * 1024 / 3, preview.length());
+        assertEquals("云".repeat(preview.length()), preview, "no character may be split");
+    }
+
+    @Test
     void unreachableTargetReturnsSafeError() throws Exception {
         int unusedPort;
         try (ServerSocket socket = new ServerSocket(0)) {
@@ -280,15 +331,17 @@ class WebServerTest {
         assertTrue(message.contains("无法连接"), message);
         assertFalse(message.contains("Exception"), "stack details must not leak: " + message);
         assertFalse(message.contains("\tat "), "stack details must not leak: " + message);
+        assertTrue(result.get("responseBody").isNull(), "no response means no preview");
+        assertFalse(result.get("responseTruncated").asBoolean());
+        assertEquals(0, result.get("responseBytes").asInt());
     }
 
     @Test
-    void sensitiveValuesAreNotEchoed() throws Exception {
-        ObjectNode payload = casePayload("/post-echo", 200);
+    void requestHeadersAndBodyAreNotAddedToResult() throws Exception {
+        ObjectNode payload = casePayload("/post-created", 201);
         payload.put("method", "POST");
         payload.put("body", "{\"password\":\"hunter2\"}");
         payload.putArray("headers").add("Authorization: Bearer supersecret");
-        payload.put("expectContains", "method=POST");
 
         HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
 

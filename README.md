@@ -67,7 +67,8 @@ java -jar target/api-regression-lab-0.2.0.jar --web
 - `--web` 不能与其他命令行参数混用；重复提供或与其他模式混用时输出 `ERROR` 并以退出码 2 结束，原有 CLI 行为与退出码不变
 - 执行接口只接受本页面发起的请求：同时校验 `Origin` 与 `Host`，跨站网页或缺失 `Origin` 的请求返回 `403`，且不返回任何 CORS 允许头
 - 页面不写入 localStorage，不持久化 `Authorization`、`Cookie` 等敏感请求头，也不默认记录完整请求体
-- 出错时只返回简短说明，不显示 Java 异常堆栈；目标接口的响应体不会显示在页面上
+- 出错时只返回简短说明，不显示 Java 异常堆栈
+- 响应内容只在浏览器内存中预览，不写入测试报告、不写入标准输出/错误输出，也不落盘；关闭页面即丢失
 
 ### 页面功能
 
@@ -79,12 +80,17 @@ java -jar target/api-regression-lab-0.2.0.jar --web
 | Body | 仅 POST 显示，填写 JSON 对象或数组；页面与后端都会校验 JSON 语法 |
 | Assertions | 预期 HTTP 状态码（100-599）与可选的响应包含文本 |
 | Result | PASS / FAIL / ERROR、预期与实际状态码、失败原因、耗时 |
+| 响应内容 | 目标接口返回的实际文本；JSON 自动缩进格式化，普通文本原样展示，超过 64 KB 截断并提示 |
 
 交互说明：
 
 - 点击「发送测试」后通过 `fetch` 提交，页面不刷新
-- 请求期间按钮禁用并显示「测试中…」，避免重复提交
-- 表单错误显示在对应输入框下方，并自动聚焦第一个错误项
+- 请求期间按钮禁用并显示「发送中…」，避免重复提交
+- 表单错误显示在对应输入框下方，并自动切换选项卡、聚焦第一个错误项
+- 选项卡支持左右方向键、`Home`、`End` 切换，`Ctrl` + `Enter` 直接发送
+- 响应内容使用纯文本渲染，不解析也不执行其中的 HTML 或脚本
+- 响应内容按 UTF-8 字节数限制为 64 KB，超出时截断并提示「仅显示前 64 KB」，不会截断半个中文字符
+- 请求未完成（如连接被拒绝）时不显示任何虚构的响应内容，只显示失败原因
 - 首次打开页面预填本地天气示例：`GET http://127.0.0.1:8080/api/weather/北京`，预期 200 且响应包含「多云」。示例指向本地模拟服务，可随时替换为任意 http/https 接口
 
 ### Web 执行接口
@@ -105,8 +111,10 @@ java -jar target/api-regression-lab-0.2.0.jar --web
 响应示例：
 
 ```json
-{"status":"PASS","expectedStatus":200,"actualStatus":200,"reasonCode":null,"message":null,"durationMillis":12}
+{"status":"PASS","expectedStatus":200,"actualStatus":200,"reasonCode":null,"message":null,"durationMillis":12,"responseBody":"{\"city\":\"北京\",\"weather\":\"多云\"}","responseTruncated":false,"responseBytes":38}
 ```
+
+`responseBody` 为目标的实际响应文本，仅供页面预览：`responseBytes` 是完整响应的 UTF-8 字节数，超过 64 KB 时 `responseTruncated` 为 `true` 且 `responseBody` 只保留前 64 KB；请求未完成时 `responseBody` 为 `null`。该字段不写入测试报告，也不影响 CLI 输出格式。
 
 参数错误或非法 JSON 返回 `HTTP 400`，跨站请求返回 `HTTP 403`，响应体同样包含 `status`、`reasonCode` 与 `message`。该接口仅服务于本地页面，不承诺对外稳定。
 

@@ -38,6 +38,8 @@ final class WebServer implements AutoCloseable {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MAX_PAYLOAD_BYTES = 1024 * 1024;
     private static final int MAX_MESSAGE_LENGTH = 300;
+    /** Upper bound of the response preview; longer bodies are cut on a UTF-8 boundary. */
+    private static final int MAX_PREVIEW_BYTES = 64 * 1024;
     private static final Set<String> PAYLOAD_FIELDS = Set.of(
             "url", "method", "headers", "query", "body", "expectStatus", "expectContains");
     private static final byte[] PAGE = loadPage();
@@ -295,7 +297,51 @@ final class WebServer implements AutoCloseable {
             node.put("message", message);
         }
         node.put("durationMillis", durationMillis);
+        Preview preview = preview(result.responseBody());
+        if (preview.text() == null) {
+            node.putNull("responseBody");
+        } else {
+            node.put("responseBody", preview.text());
+        }
+        node.put("responseTruncated", preview.truncated());
+        node.put("responseBytes", preview.size());
         return node;
+    }
+
+    /**
+     * Limits the response preview without splitting a multi-byte character. A null body means the
+     * request produced no response at all, which is different from an empty response body.
+     */
+    private static Preview preview(String body) {
+        if (body == null) {
+            return new Preview(null, false, 0);
+        }
+        int totalBytes = body.getBytes(StandardCharsets.UTF_8).length;
+        if (totalBytes <= MAX_PREVIEW_BYTES) {
+            return new Preview(body, false, totalBytes);
+        }
+        int usedBytes = 0;
+        int end = 0;
+        while (end < body.length()) {
+            int codePoint = body.codePointAt(end);
+            int codePointBytes = utf8Length(codePoint);
+            if (usedBytes + codePointBytes > MAX_PREVIEW_BYTES) {
+                break;
+            }
+            usedBytes += codePointBytes;
+            end += Character.charCount(codePoint);
+        }
+        return new Preview(body.substring(0, end), true, totalBytes);
+    }
+
+    private static int utf8Length(int codePoint) {
+        if (codePoint < 0x80) {
+            return 1;
+        }
+        if (codePoint < 0x800) {
+            return 2;
+        }
+        return codePoint < 0x10000 ? 3 : 4;
     }
 
     private static void putNullable(ObjectNode node, String field, Integer value) {
@@ -365,6 +411,9 @@ final class WebServer implements AutoCloseable {
         node.put("reasonCode", "INVALID_REQUEST");
         node.put("message", message);
         node.putNull("durationMillis");
+        node.putNull("responseBody");
+        node.put("responseTruncated", false);
+        node.put("responseBytes", 0);
         return node;
     }
 
@@ -421,6 +470,9 @@ final class WebServer implements AutoCloseable {
     @FunctionalInterface
     private interface ExchangeHandler {
         void handle(HttpExchange exchange) throws IOException;
+    }
+
+    private record Preview(String text, boolean truncated, int size) {
     }
 
     private static final class PayloadTooLargeException extends IOException {

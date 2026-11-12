@@ -228,7 +228,7 @@ public final class Main {
 
             if (statusMatches && bodyMatches) {
                 out.printf("PASS expected=%d actual=%d%n", expectedStatus, actualStatus);
-                return new CaseResult(null, "PASS", expectedStatus, actualStatus, null);
+                return new CaseResult(null, "PASS", expectedStatus, actualStatus, null, body);
             }
             out.printf("FAIL expected=%d actual=%d%n", expectedStatus, actualStatus);
             if (!bodyMatches) {
@@ -236,7 +236,7 @@ public final class Main {
                         printable(options.expectedContains()));
             }
             String reasonCode = statusMatches ? "BODY_MISMATCH" : "STATUS_MISMATCH";
-            return new CaseResult(null, "FAIL", expectedStatus, actualStatus, reasonCode);
+            return new CaseResult(null, "FAIL", expectedStatus, actualStatus, reasonCode, body);
         } catch (IllegalArgumentException e) {
             err.println("ERROR " + printable(e.getMessage()));
             return CaseResult.error(null, expectedStatus, "INVALID_REQUEST");
@@ -372,15 +372,20 @@ public final class Main {
     private record SuiteCommand(Path suite, Path report) {
     }
 
+    /**
+     * Result of one execution. {@code responseBody} is kept in memory only so the local web UI can
+     * render a response preview; the console output and the JSON report never include it.
+     */
     record CaseResult(String name, String status, Integer expectedStatus,
-                      Integer actualStatus, String reasonCode) {
+                      Integer actualStatus, String reasonCode, String responseBody) {
 
         static CaseResult error(String name, Integer expectedStatus, String reasonCode) {
-            return new CaseResult(name, "ERROR", expectedStatus, null, reasonCode);
+            return new CaseResult(name, "ERROR", expectedStatus, null, reasonCode, null);
         }
 
         CaseResult named(String caseName) {
-            return new CaseResult(caseName, status, expectedStatus, actualStatus, reasonCode);
+            return new CaseResult(caseName, status, expectedStatus, actualStatus, reasonCode,
+                    responseBody);
         }
 
         int exitCode() {

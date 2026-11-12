@@ -3,449 +3,696 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API Regression Lab · 本地接口测试</title>
+<title>API Regression Lab · 单接口测试</title>
 <style>
   :root {
-    --bg: #f7f5ff;
-    --surface: #ffffff;
-    --ink: #221b3a;
-    --muted: #6f6789;
-    --line: #e9e3fa;
-    --brand: #7a5af8;
-    --brand-dark: #6847ea;
-    --brand-weak: #f1ecff;
-    --pass: #0f8f6b;
-    --pass-bg: #e6f8f0;
-    --fail: #cf3a5c;
-    --fail-bg: #fdecf0;
-    --warn: #a96a00;
-    --warn-bg: #fff3e0;
-    --radius: 18px;
-    --shadow: 0 14px 40px rgba(84, 56, 170, 0.09);
+    --bg: #f8f6f2;
+    --surface: #fffefc;
+    --ink: #302d29;
+    --muted: #817a72;
+    --line: #e5e0d7;
+    --accent: #ba7056;
+    --accent-soft: #f4e7e1;
+    --pass: #4f7a5b;
+    --pass-bg: #edf2ec;
+    --fail: #a2503f;
+    --fail-bg: #f8ece8;
+    --warn: #8b6b3d;
+    --warn-bg: #f6f0e3;
+    --radius: 10px;
   }
 
   * { box-sizing: border-box; }
 
+  html { -webkit-text-size-adjust: 100%; }
+
   body {
     margin: 0;
     min-height: 100vh;
+    background: var(--bg);
     color: var(--ink);
-    background:
-      radial-gradient(900px 520px at 8% -10%, #ece4ff 0%, rgba(236, 228, 255, 0) 60%),
-      radial-gradient(760px 480px at 100% 0%, #e8f0ff 0%, rgba(232, 240, 255, 0) 55%),
-      var(--bg);
-    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system,
-      "Segoe UI", sans-serif;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+      system-ui, -apple-system, sans-serif;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.65;
   }
 
-  .page { max-width: 1180px; margin: 0 auto; padding: 30px 24px 52px; }
+  a { color: var(--accent); }
 
-  .hero {
+  button, input, select, textarea { font: inherit; color: inherit; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 22px;
-    flex-wrap: wrap;
+    gap: 16px;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(248, 246, 242, .92);
   }
 
-  .brand { display: flex; align-items: center; gap: 14px; }
-
-  .logo {
-    width: 46px; height: 46px;
-    display: grid; place-items: center;
-    border-radius: 14px;
-    background: linear-gradient(135deg, #8b6cff, #a98bff);
-    color: #fff;
-    font-weight: 700;
-    letter-spacing: .5px;
-    box-shadow: 0 8px 20px rgba(122, 90, 248, .35);
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 18px;
+    letter-spacing: .01em;
+    white-space: nowrap;
   }
 
-  h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
-  .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .wordmark .version {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0;
+  }
 
-  .pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 14px;
-    border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--line);
+  .run-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: var(--muted);
     font-size: 12px;
-    box-shadow: 0 6px 16px rgba(84, 56, 170, .05);
+    white-space: nowrap;
   }
 
-  .pill::before {
-    content: "";
-    width: 8px; height: 8px;
+  .run-state .dot {
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--pass);
-    box-shadow: 0 0 0 4px rgba(15, 143, 107, .12);
   }
 
-  .workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
-    gap: 22px;
-    align-items: start;
+  .run-state code {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
   }
 
-  .card {
+  .run-state .sep { color: #b3aca3; }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 36px 32px 72px;
+  }
+
+  .intro { margin-bottom: 24px; }
+
+  .intro h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+  }
+
+  .intro p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .intro .example-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .panel {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 22px;
   }
 
-  .section + .section { margin-top: 22px; padding-top: 20px; border-top: 1px dashed var(--line); }
+  .editor { overflow: hidden; }
 
-  .section-head {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 12px; margin-bottom: 12px;
-  }
-
-  h2 { margin: 0; font-size: 15px; letter-spacing: .2px; }
-  .hint { color: var(--muted); font-size: 12px; }
-
-  .request-row {
+  .request-line {
     display: grid;
-    grid-template-columns: 108px minmax(0, 1fr) auto;
+    grid-template-columns: 104px minmax(0, 1fr) auto;
     gap: 10px;
-    align-items: start;
+    padding: 18px 20px 16px;
+    border-bottom: 1px solid var(--line);
   }
 
-  .select, input[type="text"], input[type="number"], textarea {
-    width: 100%;
-    padding: 11px 13px;
+  .method-select {
+    appearance: none;
+    padding: 9px 30px 9px 12px;
     border: 1px solid var(--line);
-    border-radius: 12px;
-    background: #fcfbff;
-    color: var(--ink);
-    font: inherit;
-    outline: none;
-    transition: border-color .15s, box-shadow .15s, background .15s;
-  }
-
-  .select { cursor: pointer; font-weight: 600; color: var(--brand-dark); }
-
-  input:focus, textarea:focus, .select:focus {
-    border-color: #b9a4ff;
-    background: #fff;
-    box-shadow: 0 0 0 4px rgba(122, 90, 248, .14);
-  }
-
-  textarea {
-    min-height: 132px;
-    resize: vertical;
-    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+    border-radius: 7px;
+    background: var(--bg)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23817a72' stroke-width='1.4'/%3E%3C/svg%3E")
+      no-repeat right 11px center;
+    font-family: "Cascadia Code", Consolas, monospace;
     font-size: 13px;
-    line-height: 1.55;
-  }
-
-  button {
-    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
     cursor: pointer;
-    border: none;
-    border-radius: 12px;
   }
 
-  .primary {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    min-width: 116px;
-    padding: 11px 20px;
-    background: linear-gradient(135deg, var(--brand), #9a7bff);
+  .url-input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .url-input::placeholder { color: #b3aca3; }
+
+  .method-select:hover, .url-input:hover { border-color: #d6cfc3; }
+
+  .send-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 104px;
+    padding: 9px 18px;
+    border: 1px solid #a55f46;
+    border-radius: 7px;
+    background: var(--accent);
     color: #fff;
     font-weight: 600;
-    letter-spacing: .4px;
-    box-shadow: 0 10px 22px rgba(122, 90, 248, .28);
-    transition: transform .12s, box-shadow .12s, opacity .12s;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
   }
 
-  .primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(122, 90, 248, .34); }
-  .primary:disabled { opacity: .68; cursor: progress; }
+  .send-button:hover:not(:disabled) { background: #a96249; }
 
-  .spinner {
+  .send-button:disabled {
+    background: #c9a093;
+    border-color: #c9a093;
+    cursor: progress;
+  }
+
+  .spin {
     display: none;
-    width: 14px; height: 14px;
-    border: 2px solid rgba(255, 255, 255, .45);
+    width: 12px;
+    height: 12px;
+    border: 1.6px solid rgba(255, 255, 255, .45);
     border-top-color: #fff;
     border-radius: 50%;
-    animation: spin .8s linear infinite;
+    animation: spin .75s linear infinite;
   }
 
-  .primary.loading .spinner { display: inline-block; }
+  .send-button.loading .spin { display: inline-block; }
 
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .field-error {
+    display: none;
+    margin: 6px 2px 0;
+    color: var(--fail);
+    font-size: 12px;
+  }
+
+  .field-error.visible { display: block; }
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    position: relative;
+    padding: 12px 14px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .tab:hover:not(:disabled) { color: var(--ink); }
+
+  .tab[aria-selected="true"] {
+    color: var(--ink);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab:disabled {
+    color: #bdb6ac;
+    cursor: not-allowed;
+  }
+
+  .tab .count {
+    display: inline-block;
+    min-width: 16px;
+    margin-left: 5px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  .tab[aria-selected="true"] .count { background: var(--accent-soft); color: var(--accent); }
+
+  .panel-body { padding: 18px 20px 20px; min-height: 148px; }
+
+  .tab-panel[hidden] { display: none; }
 
   .pairs { display: flex; flex-direction: column; gap: 8px; }
 
   .pair {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 34px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) 30px;
     gap: 8px;
     align-items: center;
   }
 
-  .pair input { padding: 9px 12px; }
-
-  .remove {
-    width: 34px; height: 38px;
-    background: var(--brand-weak);
-    color: var(--brand-dark);
-    font-size: 18px;
-    line-height: 1;
-    transition: background .12s, color .12s;
-  }
-
-  .remove:hover { background: #e6dcff; color: #5033c8; }
-
-  .link-btn {
-    background: none;
-    color: var(--brand-dark);
-    font-size: 12px;
-    padding: 4px 2px;
-    font-weight: 600;
-  }
-
-  .link-btn:hover { text-decoration: underline; }
-
-  .assert-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; }
-
-  .field-label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
-
-  .field-error {
-    margin: 5px 2px 0;
-    color: var(--fail);
-    font-size: 12px;
-    min-height: 0;
-    display: none;
-  }
-
-  .field-error.visible { display: block; }
-
-  .note {
-    margin: 10px 0 0;
-    padding: 9px 12px;
-    border-radius: 10px;
-    background: #faf8ff;
+  .pair input {
+    width: 100%;
+    padding: 8px 11px;
     border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px;
+  }
+
+  .pair input::placeholder { color: #b8b1a7; }
+
+  .pair-remove {
+    width: 30px;
+    height: 32px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .pair-remove:hover { background: var(--bg); color: var(--fail); }
+
+  .ghost-button {
+    margin-top: 10px;
+    padding: 5px 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .ghost-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .panel-note {
+    margin: 12px 0 0;
     color: var(--muted);
     font-size: 12px;
   }
 
-  .result-card { position: sticky; top: 24px; }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
 
-  .result-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .field label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .field input, .field textarea {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+  }
+
+  .field textarea {
+    min-height: 150px;
+    resize: vertical;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .assertions-grid {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .response-panel { margin-top: 22px; }
+
+  .response-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .response-head h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .response-head .elapsed {
+    color: var(--muted);
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11.5px;
+  }
+
+  .empty-state {
+    padding: 40px 20px 44px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .result { padding: 18px 20px 20px; }
+
+  .result-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
 
   .badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 18px;
-    border-radius: 999px;
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11.5px;
     font-weight: 700;
-    font-size: 15px;
-    letter-spacing: 1px;
+    letter-spacing: .06em;
   }
 
   .badge.pass { background: var(--pass-bg); color: var(--pass); }
   .badge.fail { background: var(--fail-bg); color: var(--fail); }
   .badge.error { background: var(--warn-bg); color: var(--warn); }
 
-  .status-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin: 18px 0 6px;
+  .summary-text { color: var(--muted); font-size: 13px; }
+
+  .facts {
+    display: flex;
+    gap: 34px;
+    margin: 16px 0 0;
+    padding: 0;
+    flex-wrap: wrap;
   }
 
-  .status-cell {
-    padding: 12px 14px;
-    border-radius: 12px;
-    background: #fbfaff;
+  .fact dt {
+    margin: 0 0 2px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .fact dd {
+    margin: 0;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .reason {
+    margin: 14px 0 0;
+    padding: 9px 12px;
+    border-left: 2px solid var(--accent);
+    background: #fbf7f4;
+    color: #6f554a;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .preview-block { margin-top: 18px; }
+
+  .preview-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .preview-head .label {
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .preview-head .size {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11px;
+  }
+
+  .preview {
+    margin: 0;
+    padding: 14px 16px;
+    max-height: 380px;
+    overflow: auto;
     border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #faf8f4;
+    color: #3d3934;
+    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 2;
   }
 
-  .status-cell span { display: block; color: var(--muted); font-size: 12px; }
-  .status-cell strong { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  .preview:empty { display: none; }
 
-  .result-message {
-    margin: 12px 0 0;
-    padding: 11px 13px;
-    border-radius: 11px;
-    background: #faf8ff;
+  .preview-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .truncate-note {
+    margin: 8px 0 0;
+    color: var(--warn);
+    font-size: 12px;
+  }
+
+  .shortcut {
+    margin: 20px 0 0;
+    color: #a0978c;
+    font-size: 11.5px;
+    text-align: right;
+  }
+
+  .shortcut kbd {
+    padding: 1px 5px;
     border: 1px solid var(--line);
-    color: var(--ink);
-    font-size: 13px;
-    word-break: break-word;
+    border-radius: 4px;
+    background: var(--surface);
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 10.5px;
   }
-
-  .result-message:empty { display: none; }
-
-  .empty { padding: 34px 12px; text-align: center; color: var(--muted); }
-  .empty-mark {
-    width: 54px; height: 54px;
-    margin: 0 auto 14px;
-    display: grid; place-items: center;
-    border-radius: 50%;
-    background: var(--brand-weak);
-    color: var(--brand-dark);
-    font-size: 22px;
-  }
-  .empty p { margin: 4px 0; }
-
-  .meta { margin-top: 14px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 10px; }
-
-  footer { margin-top: 26px; text-align: center; color: var(--muted); font-size: 12px; }
 
   .sr-only {
-    position: absolute; width: 1px; height: 1px;
-    padding: 0; margin: -1px; overflow: hidden;
-    clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
-  @media (max-width: 940px) {
-    .workspace { grid-template-columns: minmax(0, 1fr); }
-    .result-card { position: static; }
+  @media (max-width: 720px) {
+    .topbar { padding: 14px 18px; }
+    .wordmark { font-size: 16px; }
+    .page { padding: 26px 16px 56px; }
+    .request-line { grid-template-columns: 92px minmax(0, 1fr); padding: 14px 16px; }
+    .send-button { grid-column: 1 / -1; width: 100%; }
+    .tabs { padding: 0 8px; }
+    .tab { padding: 11px 9px; font-size: 12.5px; }
+    .tab .count { margin-left: 3px; }
+    .panel-body { padding: 16px; }
+    .assertions-grid { grid-template-columns: minmax(0, 1fr); }
+    .facts { gap: 24px; }
+    .response-head { padding: 13px 16px; }
+    .result { padding: 16px; }
+    .intro h1 { font-size: 21px; }
   }
 
-  @media (max-width: 640px) {
-    .page { padding: 20px 14px 40px; }
-    .request-row { grid-template-columns: minmax(0, 1fr); }
-    .primary { width: 100%; }
-    .assert-grid { grid-template-columns: minmax(0, 1fr); }
-    .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px; }
-    .card { padding: 18px; }
-    h1 { font-size: 19px; }
+  @media (max-width: 430px) {
+    .wordmark .version { display: none; }
+    .run-state .sep, .run-state code { display: none; }
   }
 </style>
 </head>
 <body>
-<div class="page">
-  <header class="hero">
-    <div class="brand">
-      <div class="logo">AR</div>
-      <div>
-        <h1>API Regression Lab</h1>
-        <p class="sub">单接口可视化测试 · 复用本地 CLI 测试引擎</p>
+<header class="topbar">
+  <div class="wordmark">API Regression Lab <span class="version">v0.2.0</span></div>
+  <div class="run-state"><span class="dot"></span><span>本地运行</span><span class="sep" aria-hidden="true">·</span><code>127.0.0.1:8765</code></div>
+</header>
+
+<main class="page">
+  <section class="intro">
+    <h1>单接口测试</h1>
+    <p>填写请求并校验状态码与响应内容。所有请求只从本机发出，不保存任何输入或响应。
+      <button type="button" class="example-link" id="load-example">载入本地天气示例</button>
+    </p>
+  </section>
+
+  <form id="test-form" novalidate autocomplete="off">
+    <section class="panel editor">
+      <div class="request-line">
+        <label class="sr-only" for="method">HTTP 方法</label>
+        <select id="method" class="method-select">
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+        </select>
+        <div>
+          <label class="sr-only" for="url">接口 URL</label>
+          <input id="url" class="url-input" type="text" spellcheck="false"
+                 placeholder="http://127.0.0.1:8080/api/weather/北京">
+          <p class="field-error" id="error-url"></p>
+        </div>
+        <button type="submit" class="send-button" id="send">
+          <span class="spin" aria-hidden="true"></span>
+          <span id="send-label">发送测试</span>
+        </button>
       </div>
-    </div>
-    <span class="pill">仅监听 127.0.0.1</span>
-  </header>
 
-  <div class="workspace">
-    <form id="test-form" class="card" novalidate autocomplete="off">
-      <section class="section">
-        <div class="section-head">
-          <h2>请求</h2>
-          <button type="button" class="link-btn" id="load-example">载入本地天气示例</button>
-        </div>
-        <div class="request-row">
-          <label class="sr-only" for="method">HTTP 方法</label>
-          <select id="method" class="select">
-            <option value="GET">GET</option>
-            <option value="POST">POST</option>
-          </select>
-          <div>
-            <label class="sr-only" for="url">接口 URL</label>
-            <input id="url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8080/api/weather/北京">
-            <p class="field-error" id="error-url"></p>
-          </div>
-          <button type="submit" class="primary" id="send">
-            <span class="label">发送测试</span>
-            <span class="spinner" aria-hidden="true"></span>
-          </button>
-        </div>
-        <p class="note">示例指向本地模拟服务 <code>127.0.0.1:8080</code>（需先启动），也可替换为任意 http/https 接口。</p>
-      </section>
+      <div class="tabs" role="tablist" aria-label="请求配置">
+        <button type="button" class="tab" role="tab" id="tab-params" data-tab="params"
+                aria-selected="true" aria-controls="panel-params" tabindex="0">
+          Params <span class="count" id="count-params">0</span>
+        </button>
+        <button type="button" class="tab" role="tab" id="tab-headers" data-tab="headers"
+                aria-selected="false" aria-controls="panel-headers" tabindex="-1">
+          Headers <span class="count" id="count-headers">0</span>
+        </button>
+        <button type="button" class="tab" role="tab" id="tab-body" data-tab="body"
+                aria-selected="false" aria-controls="panel-body" tabindex="-1">
+          Body
+        </button>
+        <button type="button" class="tab" role="tab" id="tab-assertions" data-tab="assertions"
+                aria-selected="false" aria-controls="panel-assertions" tabindex="-1">
+          Assertions
+        </button>
+      </div>
 
-      <section class="section">
-        <div class="section-head">
-          <h2>Params 查询参数</h2>
-          <button type="button" class="link-btn" data-add="params">+ 添加参数</button>
+      <div class="panel-body">
+        <div class="tab-panel" role="tabpanel" id="panel-params" data-panel="params"
+             aria-labelledby="tab-params">
+          <div class="pairs" id="params"></div>
+          <button type="button" class="ghost-button" data-add="params">+ 添加查询参数</button>
+          <p class="field-error" id="error-params"></p>
+          <p class="panel-note">参数会按 UTF-8 编码后追加到 URL，名称不能为空。</p>
         </div>
-        <div class="pairs" id="params"></div>
-        <p class="field-error" id="error-params"></p>
-      </section>
 
-      <section class="section">
-        <div class="section-head">
-          <h2>Headers 请求头</h2>
-          <button type="button" class="link-btn" data-add="headers">+ 添加请求头</button>
+        <div class="tab-panel" role="tabpanel" id="panel-headers" data-panel="headers"
+             aria-labelledby="tab-headers" hidden>
+          <div class="pairs" id="headers"></div>
+          <button type="button" class="ghost-button" data-add="headers">+ 添加请求头</button>
+          <p class="field-error" id="error-headers"></p>
+          <p class="panel-note">Authorization、Cookie 等敏感请求头只用于本次请求，页面不会保存。</p>
         </div>
-        <div class="pairs" id="headers"></div>
-        <p class="field-error" id="error-headers"></p>
-        <p class="note">Authorization、Cookie 等敏感请求头只用于本次请求，页面不会保存。</p>
-      </section>
 
-      <section class="section" id="body-section" hidden>
-        <div class="section-head">
-          <h2>Body · JSON</h2>
-          <span class="hint">仅 POST 使用</span>
-        </div>
-        <textarea id="body" spellcheck="false" placeholder='{
+        <div class="tab-panel" role="tabpanel" id="panel-body" data-panel="body"
+             aria-labelledby="tab-body" hidden>
+          <div class="field">
+            <label for="body">JSON 请求体</label>
+            <textarea id="body" spellcheck="false" placeholder='{
   "name": "测试"
 }'></textarea>
-        <p class="field-error" id="error-body"></p>
-      </section>
+          </div>
+          <p class="field-error" id="error-body"></p>
+          <p class="panel-note">仅 POST 使用，Content-Type 自动设置为 application/json; charset=utf-8。</p>
+        </div>
 
-      <section class="section">
-        <div class="section-head">
-          <h2>Assertions 断言</h2>
-          <span class="hint">两项都会校验</span>
-        </div>
-        <div class="assert-grid">
-          <div>
-            <label class="field-label" for="expect-status">预期 HTTP 状态码</label>
-            <input id="expect-status" type="number" min="100" max="599" step="1" value="200">
+        <div class="tab-panel" role="tabpanel" id="panel-assertions" data-panel="assertions"
+             aria-labelledby="tab-assertions" hidden>
+          <div class="assertions-grid">
+            <div class="field">
+              <label for="expect-status">预期 HTTP 状态码</label>
+              <input id="expect-status" type="number" min="100" max="599" step="1" value="200">
+            </div>
+            <div class="field">
+              <label for="expect-contains">预期响应包含文本</label>
+              <input id="expect-contains" type="text" placeholder="例如：多云（留空则不校验）">
+            </div>
           </div>
-          <div>
-            <label class="field-label" for="expect-contains">预期响应包含文本</label>
-            <input id="expect-contains" type="text" placeholder="例如：多云（留空则不校验）">
-          </div>
-        </div>
-        <p class="field-error" id="error-status"></p>
-      </section>
-    </form>
-
-    <aside class="card result-card">
-      <div class="section-head">
-        <h2>测试结果</h2>
-        <span class="hint" id="result-time"></span>
-      </div>
-      <div id="result-empty" class="empty">
-        <div class="empty-mark">?</div>
-        <p>尚未运行测试</p>
-        <p class="muted">填写接口信息后点击「发送测试」</p>
-      </div>
-      <div id="result-body" hidden aria-live="polite">
-        <div class="result-top">
-          <span id="result-status" class="badge pass">PASS</span>
-          <span class="hint" id="result-duration"></span>
-        </div>
-        <div class="status-grid">
-          <div class="status-cell">
-            <span>预期状态码</span>
-            <strong id="result-expected">—</strong>
-          </div>
-          <div class="status-cell">
-            <span>实际状态码</span>
-            <strong id="result-actual">—</strong>
-          </div>
-        </div>
-        <p class="result-message" id="result-message"></p>
-        <div class="meta">
-          <span id="result-reason"></span>
-          <span id="result-clock"></span>
+          <p class="field-error" id="error-status"></p>
+          <p class="panel-note">两项断言都会校验：状态码必须一致，填写文本时必须出现在响应中。</p>
         </div>
       </div>
-    </aside>
-  </div>
+    </section>
+  </form>
 
-  <footer>测试结果仅保存在当前页面内存中，不会写入本地文件。</footer>
-</div>
+  <section class="panel response-panel" aria-live="polite">
+    <div class="response-head">
+      <h2>响应</h2>
+      <span class="elapsed" id="elapsed"></span>
+    </div>
+
+    <div class="empty-state" id="response-empty">发送请求后，这里会显示断言结果与实际响应内容。</div>
+
+    <div class="result" id="response-result" hidden>
+      <div class="result-summary">
+        <span class="badge pass" id="status-badge">PASS</span>
+        <span class="summary-text" id="summary-text"></span>
+      </div>
+
+      <dl class="facts">
+        <div class="fact"><dt>预期状态码</dt><dd id="fact-expected">—</dd></div>
+        <div class="fact"><dt>实际状态码</dt><dd id="fact-actual">—</dd></div>
+        <div class="fact"><dt>耗时</dt><dd id="fact-duration">—</dd></div>
+      </dl>
+
+      <p class="reason" id="reason" hidden></p>
+
+      <div class="preview-block">
+        <div class="preview-head">
+          <span class="label">响应内容</span>
+          <span class="size" id="preview-size"></span>
+        </div>
+        <pre class="preview" id="preview" tabindex="0" aria-label="响应内容"></pre>
+        <p class="preview-note" id="preview-note" hidden></p>
+        <p class="truncate-note" id="truncate-note" hidden></p>
+      </div>
+    </div>
+  </section>
+
+  <p class="shortcut"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 发送测试</p>
+</main>
 
 <script>
 (function () {
@@ -458,31 +705,57 @@
     contains: "多云"
   };
 
+  var MAX_PREVIEW_LABEL = "64 KB";
+
   var el = {
     form: document.getElementById("test-form"),
     method: document.getElementById("method"),
     url: document.getElementById("url"),
-    bodySection: document.getElementById("body-section"),
     body: document.getElementById("body"),
     expectStatus: document.getElementById("expect-status"),
     expectContains: document.getElementById("expect-contains"),
     params: document.getElementById("params"),
     headers: document.getElementById("headers"),
     send: document.getElementById("send"),
-    sendLabel: document.querySelector("#send .label"),
-    resultEmpty: document.getElementById("result-empty"),
-    resultBody: document.getElementById("result-body"),
-    resultStatus: document.getElementById("result-status"),
-    resultExpected: document.getElementById("result-expected"),
-    resultActual: document.getElementById("result-actual"),
-    resultDuration: document.getElementById("result-duration"),
-    resultMessage: document.getElementById("result-message"),
-    resultReason: document.getElementById("result-reason"),
-    resultTime: document.getElementById("result-time"),
-    resultClock: document.getElementById("result-clock")
+    sendLabel: document.getElementById("send-label"),
+    responseEmpty: document.getElementById("response-empty"),
+    responseResult: document.getElementById("response-result"),
+    statusBadge: document.getElementById("status-badge"),
+    summaryText: document.getElementById("summary-text"),
+    factExpected: document.getElementById("fact-expected"),
+    factActual: document.getElementById("fact-actual"),
+    factDuration: document.getElementById("fact-duration"),
+    elapsed: document.getElementById("elapsed"),
+    reason: document.getElementById("reason"),
+    preview: document.getElementById("preview"),
+    previewSize: document.getElementById("preview-size"),
+    previewNote: document.getElementById("preview-note"),
+    truncateNote: document.getElementById("truncate-note"),
+    countParams: document.getElementById("count-params"),
+    countHeaders: document.getElementById("count-headers")
   };
 
+  var tabs = Array.prototype.slice.call(document.querySelectorAll("[role=tab]"));
+  var panels = Array.prototype.slice.call(document.querySelectorAll("[role=tabpanel]"));
   var running = false;
+
+  function tabButton(name) {
+    return document.getElementById("tab-" + name);
+  }
+
+  function activateTab(name, focusTab) {
+    var target = tabButton(name);
+    if (!target || target.disabled) return;
+    tabs.forEach(function (tab) {
+      var selected = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", selected ? "true" : "false");
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    panels.forEach(function (panel) {
+      panel.hidden = panel.dataset.panel !== name;
+    });
+    if (focusTab) target.focus();
+  }
 
   function setError(id, message) {
     var node = document.getElementById(id);
@@ -505,29 +778,31 @@
     nameInput.type = "text";
     nameInput.className = "pair-name";
     nameInput.spellcheck = false;
-    nameInput.placeholder = kind === "headers" ? "请求头名称，例如 X-Token" : "参数名，例如 city";
+    nameInput.placeholder = kind === "headers" ? "名称，例如 X-Token" : "名称，例如 city";
 
     var valueInput = document.createElement("input");
     valueInput.type = "text";
     valueInput.className = "pair-value";
     valueInput.spellcheck = false;
-    valueInput.placeholder = kind === "headers" ? "请求头的值" : "参数值，例如 北京";
+    valueInput.placeholder = kind === "headers" ? "值" : "值，例如 北京";
 
     var remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "remove";
+    remove.className = "pair-remove";
     remove.title = "删除这一行";
     remove.setAttribute("aria-label", "删除这一行");
     remove.textContent = "×";
     remove.addEventListener("click", function () {
       row.remove();
       if (!container.children.length) addPair(container, kind);
+      updateCounts();
     });
 
     row.appendChild(nameInput);
     row.appendChild(valueInput);
     row.appendChild(remove);
     container.appendChild(row);
+    updateCounts();
   }
 
   function resetPairs() {
@@ -537,10 +812,17 @@
     addPair(el.headers, "headers");
   }
 
-  function syncMethod() {
-    var isPost = el.method.value === "POST";
-    el.bodySection.hidden = !isPost;
-    if (!isPost) setError("error-body", "");
+  function countFilled(container) {
+    var count = 0;
+    container.querySelectorAll(".pair").forEach(function (row) {
+      if (row.querySelector(".pair-name").value.trim()) count++;
+    });
+    return count;
+  }
+
+  function updateCounts() {
+    el.countParams.textContent = String(countFilled(el.params));
+    el.countHeaders.textContent = String(countFilled(el.headers));
   }
 
   function readPairs(container, kind) {
@@ -550,15 +832,14 @@
       var name = rows[i].querySelector(".pair-name").value.trim();
       var value = rows[i].querySelector(".pair-value").value;
       if (!name && !value.trim()) continue;
+      if (!name) throw new Error("名称不能为空");
       if (kind === "headers") {
-        if (!name) throw new Error("请求头名称不能为空");
         if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) {
           throw new Error("请求头名称不合法：" + name);
         }
         if (/[\r\n]/.test(value)) throw new Error("请求头值不能包含换行");
         values.push(name + ": " + value.trim());
       } else {
-        if (!name) throw new Error("查询参数名称不能为空");
         if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) {
           throw new Error("查询参数不能包含换行");
         }
@@ -575,30 +856,25 @@
     var url = el.url.value.trim();
     var normalizedUrl = url;
     if (!url) {
-      setError("error-url", "请填写接口 URL");
-      invalid.push(el.url);
+      invalid.push({ field: el.url, tab: null, errorId: "error-url", message: "请填写接口 URL" });
     } else if (!/^https?:\/\//i.test(url)) {
-      setError("error-url", "URL 需要以 http:// 或 https:// 开头");
-      invalid.push(el.url);
+      invalid.push({ field: el.url, tab: null, errorId: "error-url", message: "URL 需要以 http:// 或 https:// 开头" });
     } else {
       try {
         normalizedUrl = new URL(url).href;
       } catch (e) {
-        setError("error-url", "URL 格式不正确");
-        invalid.push(el.url);
+        invalid.push({ field: el.url, tab: null, errorId: "error-url", message: "URL 格式不正确" });
       }
     }
 
     var statusText = el.expectStatus.value.trim();
     var expectStatus = null;
     if (!/^\d+$/.test(statusText)) {
-      setError("error-status", "请填写 100-599 之间的整数状态码");
-      invalid.push(el.expectStatus);
+      invalid.push({ field: el.expectStatus, tab: "assertions", errorId: "error-status", message: "请填写 100-599 之间的整数状态码" });
     } else {
       var parsedStatus = Number(statusText);
       if (parsedStatus < 100 || parsedStatus > 599) {
-        setError("error-status", "状态码需要在 100-599 之间");
-        invalid.push(el.expectStatus);
+        invalid.push({ field: el.expectStatus, tab: "assertions", errorId: "error-status", message: "状态码需要在 100-599 之间" });
       } else {
         expectStatus = parsedStatus;
       }
@@ -609,38 +885,36 @@
     try {
       params = readPairs(el.params, "params");
     } catch (e) {
-      setError("error-params", e.message);
-      invalid.push(el.params.querySelector("input"));
+      invalid.push({ field: el.params.querySelector("input"), tab: "params", errorId: "error-params", message: e.message });
     }
     try {
       headers = readPairs(el.headers, "headers");
     } catch (e) {
-      setError("error-headers", e.message);
-      invalid.push(el.headers.querySelector("input"));
+      invalid.push({ field: el.headers.querySelector("input"), tab: "headers", errorId: "error-headers", message: e.message });
     }
 
     var bodyText = null;
     if (el.method.value === "POST") {
       bodyText = el.body.value;
       if (!bodyText.trim()) {
-        setError("error-body", "POST 请求需要 JSON 请求体");
-        invalid.push(el.body);
+        invalid.push({ field: el.body, tab: "body", errorId: "error-body", message: "POST 请求需要 JSON 请求体" });
       } else {
         try {
           var parsedBody = JSON.parse(bodyText);
           if (parsedBody === null || typeof parsedBody !== "object") {
-            setError("error-body", "请求体必须是 JSON 对象或数组");
-            invalid.push(el.body);
+            invalid.push({ field: el.body, tab: "body", errorId: "error-body", message: "请求体必须是 JSON 对象或数组" });
           }
         } catch (e) {
-          setError("error-body", "请求体不是合法的 JSON");
-          invalid.push(el.body);
+          invalid.push({ field: el.body, tab: "body", errorId: "error-body", message: "请求体不是合法的 JSON" });
         }
       }
     }
 
     if (invalid.length) {
-      invalid[0].focus();
+      var first = invalid[0];
+      if (first.tab) activateTab(first.tab, false);
+      setError(first.errorId, first.message);
+      if (first.field) first.field.focus();
       return null;
     }
 
@@ -661,32 +935,75 @@
     running = loading;
     el.send.disabled = loading;
     el.send.classList.toggle("loading", loading);
-    el.sendLabel.textContent = loading ? "测试中…" : "发送测试";
+    el.sendLabel.textContent = loading ? "发送中…" : "发送测试";
+  }
+
+  function formatBytes(bytes) {
+    if (bytes == null) return "";
+    if (bytes < 1024) return bytes + " B";
+    return (bytes / 1024).toFixed(1) + " KB";
+  }
+
+  function prettyResponse(text) {
+    var trimmed = text.trim();
+    if (!trimmed || (trimmed.charAt(0) !== "{" && trimmed.charAt(0) !== "[")) return text;
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch (e) {
+      return text;
+    }
+  }
+
+  function setPreview(data) {
+    var body = data.responseBody;
+    el.preview.textContent = "";
+    el.previewNote.hidden = true;
+    el.truncateNote.hidden = true;
+    el.previewSize.textContent = "";
+
+    if (body === null || body === undefined) {
+      el.previewNote.textContent = "没有收到响应内容（请求未完成）。";
+      el.previewNote.hidden = false;
+      return;
+    }
+    if (body === "") {
+      el.previewNote.textContent = "响应体为空。";
+      el.previewNote.hidden = false;
+    } else {
+      el.preview.textContent = data.responseTruncated ? body : prettyResponse(body);
+      el.previewSize.textContent = formatBytes(data.responseBytes);
+    }
+    if (data.responseTruncated) {
+      el.truncateNote.textContent = "响应内容较大，仅显示前 " + MAX_PREVIEW_LABEL + "。";
+      el.truncateNote.hidden = false;
+    }
   }
 
   function showResult(data) {
     var status = data && data.status ? String(data.status).toUpperCase() : "ERROR";
     var statusClass = status === "PASS" ? "pass" : (status === "FAIL" ? "fail" : "error");
+    var summary = status === "PASS" ? "断言全部通过"
+      : (status === "FAIL" ? "响应未满足断言" : "请求未能完成");
 
-    el.resultEmpty.hidden = true;
-    el.resultBody.hidden = false;
-    el.resultStatus.textContent = status;
-    el.resultStatus.className = "badge " + statusClass;
-    el.resultExpected.textContent = data && data.expectedStatus != null ? data.expectedStatus : "—";
-    el.resultActual.textContent = data && data.actualStatus != null ? data.actualStatus : "—";
-    el.resultDuration.textContent = data && data.durationMillis != null
-      ? "耗时 " + data.durationMillis + " ms" : "";
-    el.resultReason.textContent = data && data.reasonCode ? "原因码：" + data.reasonCode : "";
-    el.resultClock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    el.resultTime.textContent = "最新一次";
+    el.responseEmpty.hidden = true;
+    el.responseResult.hidden = false;
+    el.statusBadge.textContent = status;
+    el.statusBadge.className = "badge " + statusClass;
+    el.summaryText.textContent = summary;
+    el.factExpected.textContent = data && data.expectedStatus != null ? data.expectedStatus : "—";
+    el.factActual.textContent = data && data.actualStatus != null ? data.actualStatus : "—";
+    el.factDuration.textContent = data && data.durationMillis != null ? data.durationMillis + " ms" : "—";
+    el.elapsed.textContent = data && data.durationMillis != null ? data.durationMillis + " ms" : "";
 
     var message = data && data.message ? data.message : "";
-    if (!message && status === "PASS") message = "状态码与响应内容均符合预期";
-    el.resultMessage.textContent = message;
+    el.reason.textContent = message;
+    el.reason.hidden = !message;
+
+    setPreview(data || {});
   }
 
   async function submitTest(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
     if (running) return;
 
     var payload = collect();
@@ -711,25 +1028,42 @@
         status: "ERROR",
         expectedStatus: null,
         actualStatus: null,
+        durationMillis: null,
         reasonCode: "NETWORK_ERROR",
-        message: e && e.message ? e.message : "无法连接本地测试服务"
+        message: e && e.message ? e.message : "无法连接本地测试服务",
+        responseBody: null,
+        responseTruncated: false,
+        responseBytes: 0
       });
     } finally {
       setLoading(false);
     }
   }
 
-  function loadExample() {
+  function loadExample(focusUrl) {
     el.method.value = EXAMPLE.method;
     el.url.value = EXAMPLE.url;
     el.expectStatus.value = EXAMPLE.status;
     el.expectContains.value = EXAMPLE.contains;
     el.body.value = "";
     resetPairs();
-    syncMethod();
     clearErrors();
-    el.url.focus();
-    el.url.select();
+    syncMethod();
+    activateTab("params", false);
+    if (focusUrl) {
+      el.url.focus();
+      el.url.select();
+    }
+  }
+
+  function syncMethod() {
+    var isPost = el.method.value === "POST";
+    var bodyTab = tabButton("body");
+    bodyTab.disabled = !isPost;
+    bodyTab.title = isPost ? "" : "仅 POST 请求使用 Body";
+    if (!isPost && bodyTab.getAttribute("aria-selected") === "true") {
+      activateTab("params", false);
+    }
   }
 
   el.form.addEventListener("submit", submitTest);
@@ -737,16 +1071,47 @@
   el.url.addEventListener("input", function () { setError("error-url", ""); });
   el.expectStatus.addEventListener("input", function () { setError("error-status", ""); });
   el.body.addEventListener("input", function () { setError("error-body", ""); });
-  document.getElementById("load-example").addEventListener("click", loadExample);
+  document.getElementById("load-example").addEventListener("click", function () {
+    loadExample(true);
+  });
   document.querySelectorAll("[data-add]").forEach(function (button) {
     button.addEventListener("click", function () {
       addPair(document.getElementById(button.dataset.add), button.dataset.add);
     });
   });
+  el.params.addEventListener("input", updateCounts);
+  el.headers.addEventListener("input", updateCounts);
+
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener("click", function () { activateTab(tab.dataset.tab, false); });
+    tab.addEventListener("keydown", function (event) {
+      var next = null;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      if (next === null) return;
+      event.preventDefault();
+      var candidate = next;
+      var guard = 0;
+      while (tabs[candidate].disabled && guard < tabs.length) {
+        candidate = (candidate + 1) % tabs.length;
+        guard++;
+      }
+      activateTab(tabs[candidate].dataset.tab, true);
+    });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      submitTest();
+    }
+  });
 
   resetPairs();
   syncMethod();
-  loadExample();
+  loadExample(false);
 })();
 </script>
 </body>
