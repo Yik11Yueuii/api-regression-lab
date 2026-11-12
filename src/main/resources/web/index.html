@@ -557,6 +557,40 @@
 
   /* ---- batch workspace ---- */
   .batch-panel { margin-top: 28px; }
+  .edit-banner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    border: 1px solid #e3cbbc;
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: #fdf6f1;
+  }
+  .edit-banner[hidden] { display: none; }
+  .edit-label { color: var(--accent); font-size: 12.5px; font-weight: 600; }
+  .edit-name {
+    flex: 1 1 180px;
+    min-width: 120px;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .case-flag {
+    align-self: flex-start;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
   .batch-head {
     display: flex;
     align-items: center;
@@ -754,6 +788,12 @@
   </section>
 
   <form id="test-form" novalidate autocomplete="off">
+    <div class="edit-banner" id="edit-banner" role="status" hidden>
+      <span class="edit-label">正在编辑测试集用例</span>
+      <input type="text" id="edit-name" class="edit-name" maxlength="60" placeholder="用例名称" aria-label="用例名称">
+      <button type="button" class="ghost-cta primary" id="edit-save">保存修改</button>
+      <button type="button" class="ghost-cta" id="edit-cancel">取消编辑</button>
+    </div>
     <section class="panel editor">
       <div class="request-line">
         <label class="sr-only" for="method">HTTP 方法</label>
@@ -1343,60 +1383,45 @@
    * Batch workspace
    * ============================================================= */
   var SENSITIVE_HEADERS = { authorization: 1, cookie: 1, "set-cookie": 1, "proxy-authorization": 1 };
-  var BATCH_KEY = "apilab.batch.v1";
+  var PLACEHOLDER = "***";
+  var MAX_CASES = 20;
+  var CASE_FIELDS = {
+    name: 1, method: 1, url: 1, headers: 1, query: 1,
+    body: 1, bodyJson: 1, expectStatus: 1, expectContains: 1
+  };
   var BATCH_FILENAME = "apilab-test-suite.json";
   var REPORT_FILENAME = "apilab-report.json";
 
-  function g(id) { return document.getElementById(id); }
-
-  function loadStoredCases() {
-    try {
-      var raw = sessionStorage.getItem(BATCH_KEY);
-      if (!raw) return [];
-      var parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) { return []; }
-  }
-  function saveStoredCases() {
-    try { sessionStorage.setItem(BATCH_KEY, JSON.stringify(batchCases)); } catch (e) {}
-  }
-
-  var batchCases = loadStoredCases();
+  /* Cases live in page memory only: nothing is written to localStorage or
+     sessionStorage, so credentials never survive a refresh. The exported JSON
+     file is the only way to restore a test set. */
+  var batchCases = [];
   var batchRunning = false;
+  var batchProgress = "";
+  var editingIndex = -1;
+  var nextCaseId = 1;
   var lastReport = null;
 
-  function currentCaseFromForm(name) {
-    var headers = [], query = [];
-    el.headers.querySelectorAll(".pair").forEach(function (p) {
-      var n = p.querySelector(".pair-name").value.trim();
-      var v = p.querySelector(".pair-value").value.trim();
-      if (n) headers.push(n + ": " + v);
-    });
-    el.params.querySelectorAll(".pair").forEach(function (p) {
-      var n = p.querySelector(".pair-name").value.trim();
-      var v = p.querySelector(".pair-value").value.trim();
-      if (n) query.push(n + "=" + v);
-    });
-    return {
-      name: name || "",
-      method: el.method.value,
-      url: el.url.value.trim(),
-      headers: headers,
-      query: query,
-      body: el.method.value === "POST" ? el.body.value : "",
-      expectStatus: parseInt(el.expectStatus.value, 10),
-      expectContains: el.expectContains.value.trim()
-    };
+  function g(id) { return document.getElementById(id); }
+
+  function newCaseId() { return nextCaseId++; }
+
+  function suggestName(url) {
+    var clean = (url || "").replace(/\/+$/, "");
+    var m = clean.match(/[^/]+$/);
+    return m ? m[0] : clean;
   }
 
-  function validateCase(c) {
-    if (!c.url) return "URL 不能为空";
-    if (!/^https?:\/\//i.test(c.url)) return "URL 必须以 http:// 或 https:// 开头";
-    if (!c.expectStatus || c.expectStatus < 100 || c.expectStatus > 599) return "预期状态码必须在 100–599 之间";
-    return null;
+  function nameTaken(name, exceptIndex) {
+    var key = name.toLowerCase();
+    for (var i = 0; i < batchCases.length; i++) {
+      if (i === exceptIndex) continue;
+      if ((batchCases[i].name || "").toLowerCase() === key) return true;
+    }
+    return false;
   }
 
-  function freshCase(c) {
+  function resetCaseResult(c) {
     c.status = "";
     c.actualStatus = null;
     c.reasonCode = null;
@@ -1405,9 +1430,40 @@
     c.open = false;
   }
 
+  /* A value of *** means "the export stripped this credential". Such a case is
+     marked as pending and is never sent with the placeholder as a real header. */
+  function sensitiveNames(c) {
+    var names = [];
+    (c.headers || []).forEach(function (h) {
+      var idx = h.indexOf(":");
+      if (idx < 0) return;
+      var n = h.slice(0, idx).trim();
+      if (!SENSITIVE_HEADERS[n.toLowerCase()]) return;
+      if (h.slice(idx + 1).trim() === PLACEHOLDER) names.push(n);
+    });
+    return names;
+  }
+
+  function pendingCredentials(c) { return sensitiveNames(c).length > 0; }
+
+  function caseFromPayload(name, payload) {
+    return {
+      id: newCaseId(),
+      name: name,
+      method: payload.method,
+      url: payload.url,
+      headers: (payload.headers || []).slice(),
+      query: (payload.query || []).slice(),
+      body: payload.body || "",
+      expectStatus: payload.expectStatus,
+      expectContains: payload.expectContains || "",
+      status: "", actualStatus: null, reasonCode: null, message: "",
+      durationMillis: null, open: false
+    };
+  }
+
   function sanitizeForRequest(c) {
     var o = {
-      name: c.name || "",
       method: c.method,
       url: c.url,
       headers: (c.headers || []).slice(),
@@ -1419,23 +1475,27 @@
     return o;
   }
 
-  function sanitizeForExport(c) {
-    var safe = { name: c.name || "", method: c.method, url: c.url };
-    var sh = [];
-    (c.headers || []).forEach(function (h) {
-      var idx = h.indexOf(":");
-      if (idx < 0) return;
-      var n = h.slice(0, idx).trim();
-      var v = h.slice(idx + 1).trim();
-      if (SENSITIVE_HEADERS[n.toLowerCase()]) v = "***";
-      sh.push(n + ": " + v);
-    });
-    safe.headers = sh;
-    safe.query = (c.query || []).slice();
-    if (c.method === "POST" && c.body) safe.body = c.body.replace(/Authorization\s*:\s*\S+/gi, "Authorization: ***");
-    safe.expectStatus = c.expectStatus;
-    if (c.expectContains) safe.expectContains = c.expectContains;
-    return safe;
+  /* Sensitive header values become a placeholder. Everything else is exported
+     verbatim: the page cannot know whether a URL, query parameter or request
+     body embeds a credential, so it warns about them instead of pretending. */
+  function toExportCase(c) {
+    var o = {
+      name: c.name,
+      method: c.method,
+      url: c.url,
+      headers: (c.headers || []).map(function (h) {
+        var idx = h.indexOf(":");
+        if (idx < 0) return h;
+        var n = h.slice(0, idx).trim();
+        var v = h.slice(idx + 1).trim();
+        return n + ": " + (SENSITIVE_HEADERS[n.toLowerCase()] ? PLACEHOLDER : v);
+      }),
+      query: (c.query || []).slice()
+    };
+    if (c.method === "POST" && c.body) o.body = c.body;
+    o.expectStatus = c.expectStatus;
+    if (c.expectContains) o.expectContains = c.expectContains;
+    return o;
   }
 
   function iconBtn(label, title) {
@@ -1448,6 +1508,24 @@
     return b;
   }
 
+  function setStatus(text, busy) {
+    var host = g("batch-status");
+    host.textContent = "";
+    if (busy) {
+      var spinner = document.createElement("span");
+      spinner.className = "progress";
+      spinner.textContent = text;
+      host.appendChild(spinner);
+    } else {
+      host.textContent = text;
+    }
+  }
+
+  function invalidateReport() {
+    lastReport = null;
+    updateBatchButtons();
+  }
+
   function renderBatch() {
     var empty = batchCases.length === 0;
     g("batch-empty").hidden = !empty;
@@ -1456,7 +1534,7 @@
     updateBatchButtons();
     if (empty) {
       g("sum-total").textContent = "0";
-      g("batch-status").textContent = "";
+      setStatus("", false);
       return;
     }
     renderBatchCases();
@@ -1478,11 +1556,19 @@
       name.className = "case-name";
       name.textContent = c.name || c.url;
       name.title = c.name || c.url;
+      main.appendChild(name);
+      if (pendingCredentials(c)) {
+        var flag = document.createElement("span");
+        flag.className = "case-flag";
+        flag.textContent = "待补全凭据";
+        flag.title = "敏感请求头的值为 " + PLACEHOLDER + "，编辑补全后才能运行";
+        main.appendChild(flag);
+      }
       var uri = document.createElement("div");
       uri.className = "case-uri";
       uri.textContent = c.method + " " + c.url;
       uri.title = c.url;
-      main.appendChild(name); main.appendChild(uri);
+      main.appendChild(uri);
 
       var method = document.createElement("span");
       method.className = "case-method";
@@ -1496,11 +1582,13 @@
       ctrls.className = "case-controls";
       var up = iconBtn("↑", "上移");
       var down = iconBtn("↓", "下移");
-      var edit = iconBtn("✎", "编辑到当前表单");
+      var edit = iconBtn("✎", "编辑此用例");
       var del = iconBtn("×", "删除");
-      up.disabled = i === 0 || batchRunning;
-      down.disabled = i === batchCases.length - 1 || batchRunning;
+      var locked = batchRunning || editingIndex >= 0;
+      up.disabled = locked || i === 0;
+      down.disabled = locked || i === batchCases.length - 1;
       edit.disabled = batchRunning;
+      del.disabled = locked;
       up.onclick = function () { moveCase(i, -1); };
       down.onclick = function () { moveCase(i, 1); };
       edit.onclick = function () { editToForm(i); };
@@ -1524,6 +1612,9 @@
           + " / 耗时：" + (c.durationMillis == null ? "—" : c.durationMillis) + " ms";
         if (c.reasonCode) info += "\n原因：" + c.reasonCode;
         if (c.message) info += " — " + c.message;
+        if (pendingCredentials(c)) {
+          info += "\n待补全的请求头：" + sensitiveNames(c).join("、") + "（当前值为 " + PLACEHOLDER + "）";
+        }
         var pre = document.createElement("pre");
         pre.textContent = info;
         detail.appendChild(pre);
@@ -1546,46 +1637,50 @@
     g("sum-fail").textContent = done ? fail : "—";
     g("sum-error").textContent = done ? error : "—";
     if (batchRunning) {
-      g("batch-status").innerHTML = '<span class="progress">执行中…</span>';
-    } else if (done === batchCases.length && batchCases.length > 0) {
-      g("batch-status").textContent = "已完成，全部 " + done + " 项";
+      setStatus(batchProgress || "准备执行…", true);
     } else if (!batchCases.length) {
-      g("batch-status").textContent = "";
+      setStatus("", false);
+    } else if (done === batchCases.length) {
+      setStatus("已完成，共 " + batchCases.length + " 项", false);
+    } else if (done > 0) {
+      setStatus("已完成 " + done + "/" + batchCases.length + " 项", false);
     } else {
-      g("batch-status").textContent = "点击「运行全部」执行";
+      setStatus("点击「运行全部」按顺序执行", false);
     }
   }
 
   function updateBatchButtons() {
     g("batch-run").disabled = batchRunning || batchCases.length === 0;
     g("batch-download").disabled = !lastReport || batchRunning;
+    g("batch-add-current").disabled = batchRunning || editingIndex >= 0
+      || batchCases.length >= MAX_CASES;
+    g("batch-import").disabled = batchRunning;
   }
 
   function addFromCurrent() {
-    var bodyError = null;
-    if (el.method.value === "POST") {
-      try {
-        if (el.body.value.trim()) JSON.parse(el.body.value);
-        else bodyError = "POST 请求体不能为空";
-      } catch (e) { bodyError = "请求体不是合法 JSON"; }
+    if (batchRunning || editingIndex >= 0) return;
+    if (batchCases.length >= MAX_CASES) {
+      alert("测试集最多 " + MAX_CASES + " 个用例。");
+      return;
     }
-    var suggested = el.url.value.replace(/\/$/, "");
-    var m = suggested.match(/[^/]+$/);
-    suggested = m ? m[0] : suggested;
+    var payload = collect();
+    if (!payload) return;
+    var suggested = suggestName(payload.url);
     var name = prompt("为此用例命名（可留空，自动从 URL 生成）", suggested);
     if (name === null) return;
-    name = name.trim();
-    var c = currentCaseFromForm(name);
-    var err = validateCase(c) || bodyError;
-    if (err) { alert(err); return; }
-    freshCase(c);
-    batchCases.push(c);
-    saveStoredCases();
+    name = name.trim() || suggested;
+    if (!name) { alert("用例名称不能为空。"); return; }
+    if (nameTaken(name, -1)) { alert("已有同名用例：" + name); return; }
+    batchCases.push(caseFromPayload(name, payload));
+    invalidateReport();
     renderBatch();
+    setStatus("已加入「" + name + "」", false);
   }
 
   function editToForm(i) {
+    if (batchRunning) return;
     var c = batchCases[i];
+    editingIndex = i;
     el.method.value = c.method;
     el.url.value = c.url;
     el.expectStatus.value = String(c.expectStatus);
@@ -1608,66 +1703,163 @@
     el.body.value = c.body || "";
     syncMethod();
     updateCounts();
+    clearErrors();
+    g("edit-name").value = c.name || "";
+    g("edit-banner").hidden = false;
+    updateBatchButtons();
+    setStatus("正在编辑「" + c.name + "」，保存后才会生效", false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    el.url.focus();
+  }
+
+  function saveEdit() {
+    if (batchRunning || editingIndex < 0) return;
+    var payload = collect();
+    if (!payload) return;
+    var old = batchCases[editingIndex];
+    var name = g("edit-name").value.trim() || old.name;
+    if (nameTaken(name, editingIndex)) { alert("已有同名用例：" + name); return; }
+    var updated = caseFromPayload(name, payload);
+    updated.id = old.id;
+    batchCases[editingIndex] = updated;
+    cancelEdit();
+    invalidateReport();
+    renderBatch();
+    setStatus("已保存「" + name + "」的修改，可运行全部", false);
+  }
+
+  function cancelEdit() {
+    editingIndex = -1;
+    g("edit-banner").hidden = true;
+    g("edit-name").value = "";
+    updateBatchButtons();
+    updateBatchSummary();
   }
 
   function moveCase(i, delta) {
+    if (batchRunning || editingIndex >= 0) return;
     var j = i + delta;
     if (j < 0 || j >= batchCases.length) return;
     var tmp = batchCases[i]; batchCases[i] = batchCases[j]; batchCases[j] = tmp;
-    saveStoredCases();
+    invalidateReport();
     renderBatch();
   }
 
   function removeCase(i) {
+    if (batchRunning || editingIndex >= 0) return;
     var name = batchCases[i].name || batchCases[i].url;
     if (!confirm("删除用例 \"" + name + "\" ？")) return;
     batchCases.splice(i, 1);
-    lastReport = null;
-    saveStoredCases();
+    invalidateReport();
     renderBatch();
   }
 
-  function runBatch() {
+  function hasPostCases() {
+    return batchCases.some(function (c) { return c.method === "POST"; });
+  }
+
+  async function runBatch() {
     if (batchRunning || !batchCases.length) return;
+    if (editingIndex >= 0) { alert("请先保存或取消当前编辑，再运行测试集。"); return; }
+
+    var blocked = batchCases.filter(pendingCredentials);
+    if (blocked.length) {
+      alert("以下用例含有待补全的敏感请求头（值为 " + PLACEHOLDER + "）：\n"
+        + blocked.map(function (c) { return "· " + c.name; }).join("\n")
+        + "\n\n请先编辑补全真实凭据。占位符不会被当成真实凭据发送。");
+      return;
+    }
+    if (hasPostCases() && !confirm("测试集包含 POST 用例，执行时可能修改目标服务的数据。\n\n"
+        + "确认按顺序运行全部 " + batchCases.length + " 个用例吗？")) {
+      return;
+    }
+
+    // Immutable snapshot: results are matched by case id, never by list index,
+    // so the UI cannot show a result on the wrong row.
+    var snapshot = batchCases.map(function (c) {
+      return { id: c.id, name: c.name, payload: sanitizeForRequest(c) };
+    });
     batchRunning = true;
     lastReport = null;
-    batchCases.forEach(freshCase);
+    batchProgress = "";
+    batchCases.forEach(resetCaseResult);
     renderBatch();
-    updateBatchSummary();
-    updateBatchButtons();
 
-    fetch("/api/batch", {
+    var reportCases = [];
+    try {
+      for (var i = 0; i < snapshot.length; i++) {
+        batchProgress = "执行中 " + (i + 1) + "/" + snapshot.length + " · " + snapshot[i].name;
+        updateBatchSummary();
+        var result;
+        try {
+          result = await sendOne(snapshot[i].payload);
+        } catch (e) {
+          result = {
+            status: "ERROR", expectedStatus: snapshot[i].payload.expectStatus,
+            actualStatus: null, reasonCode: "REQUEST_FAILED",
+            message: "无法连接本地测试服务，请确认服务仍在运行", durationMillis: null
+          };
+        }
+        applyResult(snapshot[i].id, result);
+        reportCases.push({
+          name: snapshot[i].name,
+          status: result.status,
+          expectedStatus: result.expectedStatus,
+          actualStatus: result.actualStatus,
+          reasonCode: result.reasonCode
+        });
+        renderBatch();
+      }
+      lastReport = {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        summary: summarize(reportCases),
+        cases: reportCases
+      };
+    } finally {
+      batchRunning = false;
+      batchProgress = "";
+      renderBatch();
+    }
+  }
+
+  function sendOne(payload) {
+    return fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: 1, cases: batchCases.map(sanitizeForRequest) })
+      body: JSON.stringify(payload)
     }).then(function (res) {
-      if (!res.ok) {
-        return res.json().catch(function () { return { reasonCode: "INVALID_REQUEST", message: "服务器返回 HTTP " + res.status }; })
-          .then(function (err) { throw err; });
-      }
-      return res.json();
-    }).then(function (data) {
-      data.cases.forEach(function (r, i) {
-        if (!batchCases[i]) return;
-        batchCases[i].status = r.status;
-        batchCases[i].actualStatus = r.actualStatus;
-        batchCases[i].reasonCode = r.reasonCode;
-        batchCases[i].message = r.message || "";
-        batchCases[i].durationMillis = r.durationMillis;
+      return res.json().catch(function () {
+        return {
+          status: "ERROR", expectedStatus: payload.expectStatus, actualStatus: null,
+          reasonCode: "INVALID_REQUEST", message: "服务器返回 HTTP " + res.status,
+          durationMillis: null
+        };
       });
-      lastReport = data.report;
-      batchRunning = false;
-      saveStoredCases();
-      renderBatch();
-      updateBatchSummary();
-      updateBatchButtons();
-    }).catch(function (err) {
-      batchRunning = false;
-      renderBatch();
-      g("batch-status").textContent = err.message || "执行失败";
-      alert("批量执行失败：" + (err.message || err));
     });
+  }
+
+  function applyResult(id, result) {
+    for (var i = 0; i < batchCases.length; i++) {
+      if (batchCases[i].id !== id) continue;
+      var c = batchCases[i];
+      c.status = result.status || "ERROR";
+      c.actualStatus = result.actualStatus == null ? null : result.actualStatus;
+      c.reasonCode = result.reasonCode || null;
+      c.message = result.message || "";
+      c.durationMillis = result.durationMillis == null ? null : result.durationMillis;
+      return;
+    }
+  }
+
+  function summarize(items) {
+    var summary = { total: items.length, pass: 0, fail: 0, error: 0 };
+    items.forEach(function (r) {
+      if (r.status === "PASS") summary.pass++;
+      else if (r.status === "FAIL") summary.fail++;
+      else summary.error++;
+    });
+    return summary;
   }
 
   function triggerDownload(text, filename, mime) {
@@ -1685,53 +1877,196 @@
   }
 
   function exportBatch() {
+    if (batchRunning) return;
     if (!batchCases.length) { alert("测试集是空的，没有可导出的内容。"); return; }
-    var payload = { version: 1, cases: batchCases.map(sanitizeForExport), exportedAt: new Date().toISOString() };
-    var hasSensitive = payload.cases.some(function (c) {
-      return (c.headers || []).some(function (h) { return h.indexOf("***") >= 0; })
-        || (c.body && c.body.indexOf("***") >= 0);
-    });
-    triggerDownload(JSON.stringify(payload, null, 2), BATCH_FILENAME, "application/json");
-    if (hasSensitive) {
-      setTimeout(function () {
-        alert("测试集已导出。\n已将 Authorization / Cookie 等敏感请求头的值替换为 ***，请求体里的 Authorization 值也已脱敏。\n\n下次打开本页面时可以重新导入这个文件，但敏感值需要手动补回。");
-      }, 300);
+    var placeholders = batchCases.filter(pendingCredentials).length;
+    var message = "导出前请确认：\n\n"
+      + "· Authorization、Cookie 等敏感请求头的值会写成 " + PLACEHOLDER + "，导入后需要重新填写；\n"
+      + "· URL、查询参数和请求体不会自动脱敏，其中可能包含 token、密钥或其他凭据；\n"
+      + "· 文件只保存到你选择的本地位置，不会上传到任何服务器。";
+    if (placeholders) {
+      message += "\n\n当前有 " + placeholders + " 个用例的敏感请求头已是 " + PLACEHOLDER + "。";
     }
+    if (!confirm(message + "\n\n确认导出吗？")) return;
+    triggerDownload(JSON.stringify({
+      version: 1,
+      cases: batchCases.map(toExportCase),
+      exportedAt: new Date().toISOString()
+    }, null, 2), BATCH_FILENAME, "application/json");
   }
 
-  function importBatch() { g("batch-file").click(); }
+  function importBatch() {
+    if (batchRunning) return;
+    if (editingIndex >= 0) { alert("请先保存或取消当前编辑，再导入测试集。"); return; }
+    g("batch-file").click();
+  }
 
   function handleImportFile(file) {
+    if (batchRunning) return;
+    if (file.size > 1024 * 1024) {
+      alert("文件过大：测试集文件不能超过 1 MB。\n\n原测试集未做任何修改。");
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function () {
+      var parsed;
       try {
-        var data = JSON.parse(reader.result);
-        var arr;
-        if (Array.isArray(data)) arr = data;
-        else if (data && data.cases && Array.isArray(data.cases)) arr = data.cases;
-        else throw new Error("不认识的文件格式");
-        if (!arr.length) { alert("文件里没有用例。"); return; }
-        var msg = "导入 " + arr.length + " 个用例。";
-        var sensitiveInFile = arr.some(function (c) {
-          return (c.headers || []).some(function (h) { return h && h.indexOf("***") >= 0; });
-        });
-        if (sensitiveInFile) msg += "\n\n文件中包含已脱敏的敏感请求头（值为 ***），需要手动替换后再运行。";
-        if (!confirm(msg + "\n\n原测试集将被替换，确认导入吗？")) return;
-        batchCases = arr.map(function (c) {
-          return {
-            name: c.name || "", method: (c.method || "GET").toUpperCase(),
-            url: c.url, headers: c.headers || [], query: c.query || [],
-            body: c.body || "", expectStatus: c.expectStatus,
-            expectContains: c.expectContains || "",
-            status: "", actualStatus: null, reasonCode: null, message: "", durationMillis: null, open: false
-          };
-        });
-        lastReport = null;
-        saveStoredCases();
-        renderBatch();
-      } catch (e) { alert("无法解析文件：" + e.message); }
+        parsed = parseSuiteFile(String(reader.result));
+      } catch (e) {
+        alert("导入失败：" + e.message + "\n\n原测试集未做任何修改。");
+        return;
+      }
+      var placeholders = parsed.filter(pendingCredentials).length;
+      var message = "将导入 " + parsed.length + " 个用例，替换当前测试集。";
+      if (placeholders) {
+        message += "\n\n其中 " + placeholders + " 个用例的敏感请求头仍是 " + PLACEHOLDER
+          + "，导入后需要编辑补全才能运行。";
+      }
+      if (!confirm(message + "\n\n确认导入吗？")) return;
+      batchCases = parsed;
+      lastReport = null;
+      renderBatch();
+      setStatus("已导入 " + parsed.length + " 个用例", false);
     };
+    reader.onerror = function () { alert("无法读取文件。"); };
     reader.readAsText(file);
+  }
+
+  /* Fully validates the file before anything is replaced: a rejected import
+     never leaves a partially applied test set behind. */
+  function parseSuiteFile(text) {
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error("文件不是合法的 JSON");
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("顶层必须是包含 version 和 cases 的 JSON 对象");
+    }
+    Object.keys(data).forEach(function (key) {
+      if (key !== "version" && key !== "cases" && key !== "exportedAt") {
+        throw new Error("包含未知字段：" + key);
+      }
+    });
+    if (data.version !== 1) throw new Error("只支持 version=1 的测试集文件");
+    if (!Array.isArray(data.cases)) throw new Error("缺少 cases 数组");
+    if (!data.cases.length) throw new Error("cases 不能为空");
+    if (data.cases.length > MAX_CASES) {
+      throw new Error("最多支持 " + MAX_CASES + " 个用例，文件中有 " + data.cases.length + " 个");
+    }
+    var seen = {};
+    return data.cases.map(function (item, i) {
+      var c = parseSuiteCase(item, i + 1);
+      var key = c.name.toLowerCase();
+      if (seen[key]) throw new Error("用例名称重复：" + c.name);
+      seen[key] = true;
+      return c;
+    });
+  }
+
+  function parseSuiteCase(item, index) {
+    var where = "第 " + index + " 个用例";
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(where + "必须是 JSON 对象");
+    }
+    Object.keys(item).forEach(function (key) {
+      if (!CASE_FIELDS[key]) throw new Error(where + "包含未知字段：" + key);
+    });
+    if (typeof item.name !== "string" || !item.name.trim()) {
+      throw new Error(where + "缺少 name（用例名称）");
+    }
+    var name = item.name.trim();
+    if (name.length > 60) throw new Error(where + "的 name 不能超过 60 个字符");
+
+    var method = item.method == null ? "GET" : item.method;
+    if (typeof method !== "string") throw new Error(where + "的 method 必须是字符串");
+    method = method.toUpperCase();
+    if (method !== "GET" && method !== "POST") {
+      throw new Error(where + "的 method 只能是 GET 或 POST");
+    }
+
+    if (typeof item.url !== "string" || !item.url.trim()) throw new Error(where + "缺少 url");
+    var url = item.url.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error(where + "的 url 必须以 http:// 或 https:// 开头");
+    }
+    try { new URL(url); } catch (e) { throw new Error(where + "的 url 格式不正确"); }
+
+    var headers = item.headers == null ? [] : item.headers;
+    if (!Array.isArray(headers)) throw new Error(where + "的 headers 必须是字符串数组");
+    headers = headers.map(function (h) {
+      if (typeof h !== "string") throw new Error(where + "的 headers 只能包含字符串");
+      if (/[\r\n]/.test(h)) throw new Error(where + "的请求头不能包含换行");
+      var idx = h.indexOf(":");
+      if (idx <= 0) throw new Error(where + "的请求头格式应为 \"名称: 值\"");
+      var headerName = h.slice(0, idx).trim();
+      if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) {
+        throw new Error(where + "的请求头名称不合法：" + headerName);
+      }
+      return headerName + ": " + h.slice(idx + 1).trim();
+    });
+
+    var query = item.query == null ? [] : item.query;
+    if (!Array.isArray(query)) throw new Error(where + "的 query 必须是字符串数组");
+    query = query.map(function (q) {
+      if (typeof q !== "string") throw new Error(where + "的 query 只能包含字符串");
+      if (/[\r\n]/.test(q)) throw new Error(where + "的查询参数不能包含换行");
+      if (q.indexOf("=") <= 0) throw new Error(where + "的查询参数格式应为 \"名称=值\"");
+      return q;
+    });
+
+    if (typeof item.expectStatus !== "number" || !Number.isInteger(item.expectStatus)
+        || item.expectStatus < 100 || item.expectStatus > 599) {
+      throw new Error(where + "的 expectStatus 必须是 100-599 之间的整数");
+    }
+
+    var contains = item.expectContains;
+    if (contains != null && (typeof contains !== "string" || !contains.trim())) {
+      throw new Error(where + "的 expectContains 必须是非空字符串");
+    }
+
+    if (item.body != null && item.bodyJson != null) {
+      throw new Error(where + "不能同时提供 body 和 bodyJson");
+    }
+    var body = "";
+    if (item.body != null) {
+      if (typeof item.body !== "string") throw new Error(where + "的 body 必须是字符串");
+      body = item.body;
+    } else if (item.bodyJson != null) {
+      if (typeof item.bodyJson !== "object" || item.bodyJson === null) {
+        throw new Error(where + "的 bodyJson 必须是 JSON 对象或数组");
+      }
+      body = JSON.stringify(item.bodyJson);
+    }
+    if (method === "POST") {
+      if (!body.trim()) throw new Error(where + "是 POST 用例，必须提供 body");
+      var parsedBody;
+      try {
+        parsedBody = JSON.parse(body);
+      } catch (e) {
+        throw new Error(where + "的 body 不是合法的 JSON");
+      }
+      if (parsedBody === null || typeof parsedBody !== "object") {
+        throw new Error(where + "的 body 必须是 JSON 对象或数组");
+      }
+    } else if (body.trim()) {
+      throw new Error(where + "的 method 是 GET，不应提供 body");
+    }
+
+    return {
+      id: newCaseId(),
+      name: name,
+      method: method,
+      url: url,
+      headers: headers,
+      query: query,
+      body: body,
+      expectStatus: item.expectStatus,
+      expectContains: contains == null ? "" : contains.trim(),
+      status: "", actualStatus: null, reasonCode: null, message: "",
+      durationMillis: null, open: false
+    };
   }
 
   g("batch-add-current").onclick = addFromCurrent;
@@ -1739,6 +2074,8 @@
   g("batch-export").onclick = exportBatch;
   g("batch-download").onclick = downloadReport;
   g("batch-run").onclick = runBatch;
+  g("edit-save").onclick = saveEdit;
+  g("edit-cancel").onclick = cancelEdit;
   g("batch-file").addEventListener("change", function (ev) {
     if (ev.target.files && ev.target.files[0]) handleImportFile(ev.target.files[0]);
     ev.target.value = "";

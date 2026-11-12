@@ -3,7 +3,6 @@ package dev.yik.apilab;
 import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -18,9 +17,6 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -44,14 +40,8 @@ final class WebServer implements AutoCloseable {
     private static final int MAX_MESSAGE_LENGTH = 300;
     /** Upper bound of the response preview; longer bodies are cut on a UTF-8 boundary. */
     private static final int MAX_PREVIEW_BYTES = 64 * 1024;
-    private static final int MAX_BATCH_CASES = 20;
     private static final Set<String> PAYLOAD_FIELDS = Set.of(
             "url", "method", "headers", "query", "body", "expectStatus", "expectContains");
-    private static final Set<String> SUITE_CASE_FIELDS = Set.of(
-            "name", "url", "method", "headers", "query", "bodyJson",
-            "expectStatus", "expectContains", "body");
-    private static final Set<String> SENSITIVE_HEADERS = Set.of(
-            "authorization", "cookie", "set-cookie", "proxy-authorization");
     private static final byte[] PAGE = loadPage();
 
     private final HttpServer server;
@@ -68,7 +58,6 @@ final class WebServer implements AutoCloseable {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         server.createContext("/api/run", exchange -> safeHandle(exchange, this::handleRun));
-        server.createContext("/api/batch", exchange -> safeHandle(exchange, this::handleBatch));
         server.createContext("/", exchange -> safeHandle(exchange, this::handlePage));
         server.setExecutor(executor);
     }
@@ -220,127 +209,6 @@ final class WebServer implements AutoCloseable {
     }
 
     /**
-     * Runs a named list of cases in order. The input already lives in memory, so this endpoint has
-     * no file-system reads and no path handling whatsoever; browser-driven files go through the
-     * {@code /api/import} route instead. Per-case failures never abort the rest of the batch.
-     */
-    private void handleBatch(HttpExchange exchange) throws IOException {
-        try (exchange) {
-            if (!"POST".equals(exchange.getRequestMethod())) {
-                sendJson(exchange, 405, errorNode("批量执行接口只接受 POST 请求"));
-                return;
-            }
-            if (!isTrustedRequest(exchange)) {
-                sendJson(exchange, 403, errorNode("拒绝请求：来源不是本地测试页面"));
-                return;
-            }
-            byte[] raw;
-            try {
-                raw = readLimited(exchange.getRequestBody());
-            } catch (PayloadTooLargeException e) {
-                sendJson(exchange, 413, errorNode("测试集过大，最多 " + MAX_BATCH_CASES + " 个用例"));
-                return;
-            }
-            JsonNode payload;
-            try {
-                payload = JSON.readTree(raw);
-            } catch (JacksonException e) {
-                sendJson(exchange, 400, errorNode("请求参数不是合法的 JSON"));
-                return;
-            }
-            List<Main.WebSuiteCase> cases;
-            try {
-                cases = toSuite(payload);
-            } catch (IllegalArgumentException e) {
-                sendJson(exchange, 400, errorNode("测试集不合法：" + Main.printable(e.getMessage())));
-                return;
-            }
-            if (cases.isEmpty()) {
-                sendJson(exchange, 400, errorNode("测试集不能为空"));
-                return;
-            }
-
-            long totalStarted = System.nanoTime();
-            ByteArrayOutputStream log = new ByteArrayOutputStream();
-            PrintStream sink = new PrintStream(log, true, StandardCharsets.UTF_8);
-            ArrayNode casesNode = JSON.createArrayNode();
-            int pass = 0;
-            int fail = 0;
-            int error = 0;
-            ArrayNode reportCases = JSON.createArrayNode();
-
-            for (Main.WebSuiteCase entry : cases) {
-                sink.println("CASE " + entry.displayName());
-                long caseStarted = System.nanoTime();
-                Main.CaseResult result;
-                try {
-                    result = Main.runForWeb(entry.options(), client, sink)
-                            .named(entry.displayName());
-                } catch (IllegalArgumentException e) {
-                    sink.println("ERROR " + Main.printable(e.getMessage()));
-                    result = Main.CaseResult.error(entry.displayName(), null, "INVALID_CASE");
-                }
-                long caseDuration = (System.nanoTime() - caseStarted) / 1_000_000;
-                switch (result.status()) {
-                    case "PASS" -> pass++;
-                    case "FAIL" -> fail++;
-                    default -> error++;
-                }
-                String lineAfter = lastLine(sink.toString());
-                casesNode.add(resultNode(result, caseDuration, lineAfter));
-                reportCases.add(reportCaseNode(result));
-            }
-            long totalDuration = (System.nanoTime() - totalStarted) / 1_000_000;
-
-            ObjectNode root = JSON.createObjectNode();
-            root.put("totalDurationMillis", totalDuration);
-            root.put("startedAt", Instant.now().toString());
-            ObjectNode summary = root.putObject("summary");
-            summary.put("total", cases.size());
-            summary.put("pass", pass);
-            summary.put("fail", fail);
-            summary.put("error", error);
-            root.set("cases", casesNode);
-
-            ObjectNode reportNode = JSON.createObjectNode();
-            reportNode.put("version", 1);
-            reportNode.put("generatedAt", Instant.now().toString());
-            ObjectNode reportSummary = reportNode.putObject("summary");
-            reportSummary.put("total", cases.size());
-            reportSummary.put("pass", pass);
-            reportSummary.put("fail", fail);
-            reportSummary.put("error", error);
-            reportNode.set("cases", reportCases);
-            root.set("report", reportNode);
-
-            sendJson(exchange, 200, root);
-        }
-    }
-
-    /** The engine emits exactly one status line per case; this returns the last line so failure
-     *  hints (for example a STATUS_MISMATCH message) surface quickly on the browser side. */
-    private static String lastLine(String log) {
-        String[] lines = log.split("\n");
-        for (int i = lines.length - 1; i >= 0; i--) {
-            String line = lines[i].strip();
-            if (!line.isEmpty() && !line.startsWith("CASE ") && !line.startsWith("SUMMARY ")) {
-                return line;
-            }
-        }
-        return "";
-    }
-
-    private static ObjectNode reportCaseNode(Main.CaseResult r) {
-        ObjectNode node = JSON.createObjectNode();
-        node.put("name", r.name());
-        node.put("status", r.status());
-        putNullable(node, "expectedStatus", r.expectedStatus());
-        putNullable(node, "actualStatus", r.actualStatus());
-        putNullable(node, "reasonCode", r.reasonCode());
-        return node;
-    }
-
-    /**
      * Only the page served on this port may call the execution endpoint. Browsers always send an
      * Origin header on POST, so a missing Origin is rejected as well; the Host check additionally
      * guards against DNS rebinding.
@@ -410,109 +278,6 @@ final class WebServer implements AutoCloseable {
         if (value != null) {
             target.set(field, value);
         }
-    }
-
-    /**
-     * Accepts both an array of case objects (the shape the web UI uses in memory) and a full v1
-     * suite object with {@code version} and {@code cases} fields so the browser's own test set
-     * format is importable as well. Per-case validation is delegated to {@link Main.Options}.
-     */
-    private static List<Main.WebSuiteCase> toSuite(JsonNode payload) {
-        JsonNode casesNode;
-        if (payload.isArray()) {
-            casesNode = payload;
-        } else if (payload.isObject()) {
-            payload.fieldNames().forEachRemaining(field -> {
-                if (!field.equals("version") && !field.equals("cases")) {
-                    throw new IllegalArgumentException("不支持的字段: " + field);
-                }
-            });
-            JsonNode versionNode = payload.get("version");
-            if (versionNode != null && (!versionNode.isIntegralNumber() || versionNode.asInt() != 1)) {
-                throw new IllegalArgumentException("只支持 version=1");
-            }
-            casesNode = payload.get("cases");
-        } else {
-            throw new IllegalArgumentException("请求参数必须是一个 JSON 对象或数组");
-        }
-        if (casesNode == null || !casesNode.isArray()) {
-            throw new IllegalArgumentException("缺少 cases 字段");
-        }
-        if (casesNode.isEmpty()) {
-            throw new IllegalArgumentException("测试集不能为空");
-        }
-        if (casesNode.size() > MAX_BATCH_CASES) {
-            throw new IllegalArgumentException("测试集最多 " + MAX_BATCH_CASES + " 个用例");
-        }
-
-        List<Main.WebSuiteCase> out = new ArrayList<>();
-        int index = 0;
-        for (JsonNode item : casesNode) {
-            index++;
-            String tag = "第 " + index + " 个用例";
-            if (!item.isObject()) {
-                throw new IllegalArgumentException(tag + " 必须是 JSON 对象");
-            }
-            String name = null;
-            JsonNode nameNode = item.get("name");
-            if (nameNode != null) {
-                if (!nameNode.isTextual()) {
-                    throw new IllegalArgumentException(tag + " 的 name 必须是字符串");
-                }
-                name = nameNode.textValue();
-            }
-            for (String field : SUITE_CASE_FIELDS) {
-                if (item.has(field) && field.equals("body")) {
-                    // body is the raw string the web UI stores; translate to bodyJson below.
-                }
-            }
-
-            ObjectNode translated = JSON.createObjectNode();
-            item.fieldNames().forEachRemaining(field -> {
-                if (!SUITE_CASE_FIELDS.contains(field)) {
-                    throw new IllegalArgumentException(tag + " 不支持的字段: " + field);
-                }
-            });
-            copyField(item, translated, "url");
-            copyField(item, translated, "method");
-            copyField(item, translated, "headers");
-            copyField(item, translated, "query");
-            copyField(item, translated, "expectStatus");
-            copyField(item, translated, "expectContains");
-
-            JsonNode body = item.get("body");
-            if (body != null && !body.isNull()) {
-                if (body.isTextual()) {
-                    String text = body.textValue();
-                    if (!text.isBlank()) {
-                        JsonNode parsed;
-                        try {
-                            parsed = JSON.readTree(text);
-                        } catch (JacksonException e) {
-                            throw new IllegalArgumentException(tag + " 的 body 不是合法的 JSON");
-                        }
-                        if (parsed == null || (!parsed.isObject() && !parsed.isArray())) {
-                            throw new IllegalArgumentException(tag + " 的 body 必须是 JSON 对象或数组");
-                        }
-                        translated.set("bodyJson", parsed);
-                    }
-                } else if (body.isObject() || body.isArray()) {
-                    translated.set("bodyJson", body);
-                } else {
-                    throw new IllegalArgumentException(tag + " 的 body 必须是 JSON 对象、数组或字符串");
-                }
-            }
-            copyField(item, translated, "bodyJson");
-
-            Main.Options options;
-            try {
-                options = Main.Options.fromJson(translated, tag);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException(tag + "：" + e.getMessage());
-            }
-            out.add(Main.WebSuiteCase.of(name, options));
-        }
-        return List.copyOf(out);
     }
 
     private static ObjectNode resultNode(Main.CaseResult result, long durationMillis, String log) {

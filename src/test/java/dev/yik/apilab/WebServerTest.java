@@ -262,6 +262,83 @@ class WebServerTest {
     }
 
     @Test
+    void sequentialRunsUseLatestConfiguration() throws Exception {
+        // The web test set runs every case through /api/run one by one; each call must be fully
+        // independent so an edited case is executed with its latest URL and assertion.
+        ObjectNode first = casePayload("/ok", 200);
+        assertEquals("PASS", send(first).get("status").asText());
+
+        ObjectNode edited = casePayload("/text", 200);
+        assertEquals("PASS", send(edited).get("status").asText());
+
+        ObjectNode changed = casePayload("/ok", 201);
+        JsonNode result = send(changed);
+        assertEquals("FAIL", result.get("status").asText());
+        assertEquals("STATUS_MISMATCH", result.get("reasonCode").asText());
+        assertEquals(201, result.get("expectedStatus").asInt());
+        assertEquals(200, result.get("actualStatus").asInt());
+    }
+
+    @Test
+    void batchEndpointIsRemoved() throws Exception {
+        // V2-02 batch execution now goes through /api/run one case at a time, so the old
+        // duplicate engine endpoint must no longer exist.
+        HttpRequest request = HttpRequest.newBuilder(URI.create(webBase + "/api/batch"))
+                .header("Origin", webBase)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"version\":1,\"cases\":[]}"))
+                .build();
+
+        HttpResponse<String> response = client.send(request,
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(405, response.statusCode(), "no batch route may remain");
+    }
+
+    @Test
+    void arrayPayloadReturns400() throws Exception {
+        HttpResponse<String> response = post("[]", webBase);
+
+        assertEquals(400, response.statusCode());
+        assertEquals("ERROR", JSON.readTree(response.body()).get("status").asText());
+    }
+
+    @Test
+    void postWithoutBodyReturns400() throws Exception {
+        ObjectNode payload = casePayload("/post-created", 201);
+        payload.put("method", "POST");
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        JsonNode body = JSON.readTree(response.body());
+        assertEquals("INVALID_REQUEST", body.get("reasonCode").asText());
+        assertFalse(body.get("message").asText().contains("Exception"));
+    }
+
+    @Test
+    void getWithBodyReturns400() throws Exception {
+        ObjectNode payload = casePayload("/ok", 200);
+        payload.put("body", "{\"name\":\"测试\"}");
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        assertEquals("ERROR", JSON.readTree(response.body()).get("status").asText());
+    }
+
+    @Test
+    void statusOutOfRangeReturns400() throws Exception {
+        ObjectNode payload = casePayload("/ok", 999);
+
+        HttpResponse<String> response = post(JSON.writeValueAsString(payload), webBase);
+
+        assertEquals(400, response.statusCode());
+        assertTrue(JSON.readTree(response.body()).get("message").asText()
+                .contains("between 100 and 599"));
+    }
+
+    @Test
     void responsePreviewShowsTargetBody() throws Exception {
         ObjectNode payload = casePayload("/body", 200);
 
@@ -331,6 +408,7 @@ class WebServerTest {
         assertTrue(message.contains("无法连接"), message);
         assertFalse(message.contains("Exception"), "stack details must not leak: " + message);
         assertFalse(message.contains("\tat "), "stack details must not leak: " + message);
+        assertFalse(message.contains("PrintStream"), "log objects must not leak: " + message);
         assertTrue(result.get("responseBody").isNull(), "no response means no preview");
         assertFalse(result.get("responseTruncated").asBoolean());
         assertEquals(0, result.get("responseBytes").asInt());
@@ -422,154 +500,5 @@ class WebServerTest {
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(bytes);
         }
-    }
-
-    // ---------- batch runner tests ----------
-
-    private ObjectNode caseObject(String name, String path, int expectedStatus) {
-        ObjectNode obj = JSON.createObjectNode();
-        obj.put("name", name);
-        obj.put("method", "GET");
-        obj.put("url", mockBase + path);
-        obj.put("expectStatus", expectedStatus);
-        return obj;
-    }
-
-    private JsonNode runBatch(ObjectNode suite) throws Exception {
-        HttpResponse<String> response = postBatch(JSON.writeValueAsString(suite), webBase);
-        assertEquals(200, response.statusCode(), response.body());
-        return JSON.readTree(response.body());
-    }
-
-    private HttpResponse<String> postBatch(String body, String origin) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(webBase + "/api/batch"))
-                .timeout(Duration.ofSeconds(30))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-        if (origin != null) {
-            builder.header("Origin", origin);
-        }
-        return client.send(builder.build(),
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    }
-
-    @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    void batchRunReportsPassFailAndKeepsGoing() throws Exception {
-        ObjectNode suite = JSON.createObjectNode();
-        suite.put("version", 1);
-        com.fasterxml.jackson.databind.node.ArrayNode cases = suite.putArray("cases");
-        cases.add(caseObject("ok", "/ok", 200));
-        cases.add(caseObject("wrong-status", "/missing", 200));
-        cases.add(caseObject("another-ok", "/ok", 200));
-
-        JsonNode result = runBatch(suite);
-        assertEquals(3, result.path("summary").path("total").asInt());
-        assertEquals(2, result.path("summary").path("pass").asInt());
-        assertEquals(1, result.path("summary").path("fail").asInt());
-        assertEquals(0, result.path("summary").path("error").asInt());
-
-        JsonNode casesNode = result.path("cases");
-        assertEquals(3, casesNode.size());
-        assertEquals("PASS", casesNode.get(0).path("status").asText());
-        assertEquals("FAIL", casesNode.get(1).path("status").asText());
-        assertEquals("PASS", casesNode.get(2).path("status").asText());
-        assertEquals("STATUS_MISMATCH", casesNode.get(1).path("reasonCode").asText());
-
-        // report is a v1 JSON like the CLI report
-        JsonNode report = result.path("report");
-        assertEquals(1, report.path("version").asInt());
-        assertTrue(report.path("generatedAt").isTextual());
-        assertEquals(2, report.path("summary").path("pass").asInt());
-        assertEquals(1, report.path("summary").path("fail").asInt());
-        assertEquals("another-ok", report.path("cases").get(2).path("name").asText());
-        // report must not leak response bodies
-        assertFalse(report.path("cases").get(0).has("responseBody"));
-    }
-
-    @Test
-    @Timeout(value = 15, unit = TimeUnit.SECONDS)
-    void batchRunIncludesPostJsonCase() throws Exception {
-        ObjectNode suite = JSON.createObjectNode();
-        suite.put("version", 1);
-        com.fasterxml.jackson.databind.node.ArrayNode cases = suite.putArray("cases");
-        ObjectNode post = JSON.createObjectNode();
-        post.put("name", "create");
-        post.put("method", "POST");
-        post.put("url", mockBase + "/post-created");
-        post.put("expectStatus", 201);
-        post.put("body", "{\"name\":\"张三\"}");
-        cases.add(post);
-
-        JsonNode result = runBatch(suite);
-        assertEquals("PASS", result.path("cases").get(0).path("status").asText());
-        assertEquals(201, result.path("cases").get(0).path("actualStatus").asInt());
-    }
-
-    @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void batchRunConnectErrorStillsReturnsFollowingCases() throws Exception {
-        ObjectNode suite = JSON.createObjectNode();
-        suite.put("version", 1);
-        com.fasterxml.jackson.databind.node.ArrayNode cases = suite.putArray("cases");
-        ObjectNode err = caseObject("no-service", "/", 200);
-        err.put("url", "http://127.0.0.1:1/x");
-        cases.add(err);
-        cases.add(caseObject("after-error", "/ok", 200));
-
-        JsonNode result = runBatch(suite);
-        assertEquals("ERROR", result.path("cases").get(0).path("status").asText());
-        assertEquals("REQUEST_FAILED", result.path("cases").get(0).path("reasonCode").asText());
-        assertEquals("PASS", result.path("cases").get(1).path("status").asText());
-    }
-
-    @Test
-    @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    void batchRunRejectsUnknownFieldsAndEmpty() throws Exception {
-        ObjectNode bad = JSON.createObjectNode();
-        bad.put("version", 1);
-        com.fasterxml.jackson.databind.node.ArrayNode cases = bad.putArray("cases");
-        ObjectNode o = caseObject("x", "/ok", 200);
-        o.put("typo_field", "oops");
-        cases.add(o);
-
-        HttpResponse<String> response = postBatch(JSON.writeValueAsString(bad), webBase);
-        assertEquals(400, response.statusCode());
-        assertTrue(response.body().contains("不支持的字段"));
-
-        ObjectNode emptyCases = JSON.createObjectNode();
-        emptyCases.put("version", 1);
-        emptyCases.putArray("cases");
-        HttpResponse<String> empty = postBatch(JSON.writeValueAsString(emptyCases), webBase);
-        assertEquals(400, empty.statusCode());
-        assertTrue(empty.body().contains("不能为空"));
-    }
-
-    @Test
-    @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    void batchRunRejectsCrossOriginAndMissingOrigin() throws Exception {
-        ObjectNode suite = JSON.createObjectNode();
-        suite.put("version", 1);
-        suite.putArray("cases").add(caseObject("a", "/ok", 200));
-
-        HttpResponse<String> noOrigin = postBatch(JSON.writeValueAsString(suite), null);
-        assertEquals(403, noOrigin.statusCode());
-
-        HttpResponse<String> evilOrigin = postBatch(JSON.writeValueAsString(suite), "http://evil.example");
-        assertEquals(403, evilOrigin.statusCode());
-    }
-
-    @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    void batchRunCapsAtMaxCases() throws Exception {
-        ObjectNode suite = JSON.createObjectNode();
-        suite.put("version", 1);
-        com.fasterxml.jackson.databind.node.ArrayNode cases = suite.putArray("cases");
-        for (int i = 0; i < 21; i++) {
-            cases.add(caseObject("case-" + i, "/ok", 200));
-        }
-        HttpResponse<String> response = postBatch(JSON.writeValueAsString(suite), webBase);
-        assertEquals(400, response.statusCode());
-        assertTrue(response.body().contains("最多"));
     }
 }
