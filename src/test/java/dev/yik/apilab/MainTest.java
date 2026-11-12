@@ -946,6 +946,8 @@ class MainTest {
         Result result = run("--suite", suite.toString());
 
         assertEquals(0, result.exitCode(), result.err());
+        assertTrue(result.out().contains("CASE case.json"), result.out());
+        assertFalse(result.out().contains(caseFile.toAbsolutePath().toString()), result.out());
         assertTrue(result.out().contains("SUMMARY total=1 pass=1 fail=0 error=0"), result.out());
     }
 
@@ -1236,18 +1238,55 @@ class MainTest {
     }
 
     @Test
-    void caseNamesWithControlCharactersAreSanitized() throws Exception {
+    void caseNamesWithControlCharactersAreSanitizedInConsoleAndReport() throws Exception {
         Path dir = tempDir.resolve("report-control");
-        Path suite = writeFile(dir, "suite.json", "{\"cases\":[\"bad\\u0001name.json\"]}");
+        Path suite = writeFile(dir, "suite.json", "{\"cases\":[\"bad\\u0001na\\tme.json\"]}");
+        Path report = dir.resolve("report.json");
 
-        Result result = run("--suite", suite.toString());
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
 
         assertEquals(2, result.exitCode());
-        assertTrue(result.out().contains("CASE bad?name.json"), result.out());
+        assertTrue(result.out().contains("CASE bad?na?me.json"), result.out());
         assertEquals(1, result.out().lines()
                 .filter(line -> line.startsWith("CASE")).count());
         assertFalse(result.out().contains("\u0001"), "stdout must not contain raw control characters");
         assertFalse(result.err().contains("\u0001"), "stderr must not contain raw control characters");
+
+        JsonNode root = readReport(report);
+        assertEquals(1, root.get("summary").get("total").asInt());
+        assertEquals(1, root.get("summary").get("error").asInt());
+        assertEquals("bad?na?me.json", root.get("cases").get(0).get("name").asText());
+    }
+
+    @Test
+    void mixedNamesKeepOrderStatsAndExitCodeInReport() throws Exception {
+        Path dir = tempDir.resolve("mixed-names");
+        writeFile(dir, "first.json", caseJson(url("/text"), 200, "hello world"));
+        Path second = writeFile(tempDir.resolve("mixed-names-other"), "second.json",
+                caseJson(url("/text"), 200, "hello world"));
+        String absoluteEntry = second.toAbsolutePath().toString().replace("\\", "\\\\");
+        Path suite = writeFile(dir, "suite.json",
+                "{\"cases\":[\"first.json\",\"" + absoluteEntry + "\",\"bad\\u0001na\\tme.json\"]}");
+        Path report = dir.resolve("report.json");
+
+        Result result = run("--suite", suite.toString(), "--report-json", report.toString());
+
+        assertEquals(2, result.exitCode(), result.err());
+        assertTrue(result.out().contains("SUMMARY total=3 pass=2 fail=0 error=1"), result.out());
+        assertEquals(List.of("CASE first.json", "CASE second.json", "CASE bad?na?me.json"),
+                result.out().lines().filter(line -> line.startsWith("CASE ")).toList());
+        assertFalse(result.out().contains(second.toAbsolutePath().getParent().toString()),
+                result.out());
+
+        JsonNode cases = readReport(report).get("cases");
+        assertEquals(3, cases.size());
+        assertEquals("first.json", cases.get(0).get("name").asText());
+        assertEquals("second.json", cases.get(1).get("name").asText());
+        assertEquals("bad?na?me.json", cases.get(2).get("name").asText());
+        assertEquals("PASS", cases.get(1).get("status").asText());
+        assertEquals(200, cases.get(1).get("expectedStatus").asInt());
+        assertEquals(200, cases.get(1).get("actualStatus").asInt());
+        assertEquals("INVALID_CASE", cases.get(2).get("reasonCode").asText());
     }
 
     @Test

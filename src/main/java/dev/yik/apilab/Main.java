@@ -125,20 +125,20 @@ public final class Main {
         HttpClient client = newClient();
         List<CaseResult> results = new ArrayList<>();
         for (SuiteCase suiteCase : cases) {
-            out.println("CASE " + printable(suiteCase.label()));
+            out.println("CASE " + suiteCase.displayName());
             CaseResult result;
             if (suiteCase.path() == null) {
                 err.println("ERROR invalid case path");
-                result = CaseResult.error(suiteCase.label(), null, "INVALID_CASE");
+                result = CaseResult.error(suiteCase.displayName(), null, "INVALID_CASE");
                 results.add(result);
                 continue;
             }
             try {
                 result = runCase(Options.fromFile(suiteCase.path()), client, out, err)
-                        .named(suiteCase.label());
+                        .named(suiteCase.displayName());
             } catch (IllegalArgumentException e) {
                 err.println("ERROR " + printable(e.getMessage()));
-                result = CaseResult.error(suiteCase.label(), null, "INVALID_CASE");
+                result = CaseResult.error(suiteCase.displayName(), null, "INVALID_CASE");
             }
             results.add(result);
         }
@@ -233,9 +233,11 @@ public final class Main {
     }
 
     /**
-     * Writes the JSON report atomically: the payload is written to a temporary file in the target
-     * directory and then moved into place, so a failure never leaves a partial report behind.
-     * Failure to write is reported as ERROR/2 by the caller.
+     * Writes the JSON report through a temporary file in the target directory, then moves it into
+     * place, so a failed write never leaves a partially written report. The move is atomic where
+     * the file system supports it and degrades to a plain replace move otherwise (the temporary
+     * file is already complete at that point). Failure to write is reported as ERROR/2 by the
+     * caller.
      */
     private static void writeReport(Path reportPath, List<CaseResult> results) {
         Path target = reportPath.toAbsolutePath();
@@ -361,7 +363,7 @@ public final class Main {
         }
     }
 
-    private record SuiteCase(String label, Path path) {
+    private record SuiteCase(String displayName, Path path) {
 
         /**
          * Loads the suite manifest. Relative entries are resolved against the suite file directory,
@@ -394,9 +396,31 @@ public final class Main {
                 if (entry.isBlank()) {
                     throw new IllegalArgumentException("field 'cases' must not contain empty entries");
                 }
-                cases.add(new SuiteCase(entry, resolveCasePath(base, entry)));
+                cases.add(new SuiteCase(displayName(entry), resolveCasePath(base, entry)));
             }
             return List.copyOf(cases);
+        }
+
+        /**
+         * Builds the name shared by the console output and the JSON report. An absolute entry is
+         * reduced to its file name so local directory layout never leaks into logs or reports;
+         * control characters are replaced so one entry cannot break the output format. Reading the
+         * case file still uses the original entry.
+         */
+        private static String displayName(String entry) {
+            String name = entry;
+            try {
+                Path raw = Path.of(entry);
+                if (raw.isAbsolute() && raw.getFileName() != null) {
+                    name = raw.getFileName().toString();
+                }
+            } catch (InvalidPathException e) {
+                int separator = Math.max(entry.lastIndexOf('/'), entry.lastIndexOf('\\'));
+                if (separator >= 0) {
+                    name = entry.substring(separator + 1);
+                }
+            }
+            return printable(name);
         }
 
         /**
