@@ -102,6 +102,11 @@ class WebServerTest {
                 .startsWith("text/html"));
         assertTrue(response.body().contains("API Regression Lab"), "page must render the title");
         assertTrue(response.body().contains("/api/run"), "page must call the execution endpoint");
+        assertTrue(response.body().contains("id=\"single-workspace\""));
+        assertTrue(response.body().contains("id=\"batch-workspace\""));
+        assertTrue(response.body().contains("id=\"case-assertion-review\""));
+        assertTrue(response.body().contains("id=\"batch-download-html\""));
+        assertTrue(response.body().contains("function buildHtmlReport()"));
     }
 
     @Test
