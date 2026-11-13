@@ -6,9 +6,9 @@
 
     <groupId>dev.yik</groupId>
     <artifactId>api-regression-lab</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <name>api-regression-lab</name>
-    <description>A lightweight CLI for API regression checks.</description>
+    <description>A lightweight CLI and local Web UI for API regression checks.</description>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
