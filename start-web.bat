@@ -5,7 +5,7 @@ title API Regression Lab - Local Web UI
 rem Always run relative to this script so a double click works from any folder.
 cd /d "%~dp0"
 
-set "JAR=target\api-regression-lab-0.2.0.jar"
+set "JAR=target\api-regression-lab-0.3.0.jar"
 set "PORT=8765"
 set "URL=http://127.0.0.1:%PORT%/"
 set "JAVA_EXE="
