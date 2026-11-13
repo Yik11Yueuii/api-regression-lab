@@ -106,7 +106,8 @@ java -jar target/api-regression-lab-0.3.0.jar --web
   "summary": { "total": 3, "pass": 2, "fail": 1, "error": 0 },
   "cases": [
     { "name": "北京天气", "status": "PASS", "expectedStatus": 200, "actualStatus": 200, "reasonCode": null },
-    { "name": "创建用户", "status": "FAIL", "expectedStatus": 201, "actualStatus": 200, "reasonCode": "STATUS_MISMATCH" }
+    { "name": "创建用户", "status": "FAIL", "expectedStatus": 201, "actualStatus": 200, "reasonCode": "STATUS_MISMATCH" },
+    { "name": "仅状态码-北京", "status": "PASS", "expectedStatus": 200, "actualStatus": 200, "reasonCode": null }
   ]
 }
 ```

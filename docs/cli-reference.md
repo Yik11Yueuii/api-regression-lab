@@ -63,7 +63,6 @@ if ($LASTEXITCODE -ne 0) { throw "API regression failed" }
   "method": "GET",
   "headers": ["Accept: application/json"],
   "query": ["unit=c"],
-  "bodyJson": null,
   "expectStatus": 200,
   "expectContains": "多云"
 }
@@ -128,6 +127,13 @@ java -jar api-regression-lab-0.3.0.jar --suite examples/suite.json --report-json
       "status": "PASS",
       "expectedStatus": 200,
       "actualStatus": 200,
+      "reasonCode": null
+    },
+    {
+      "name": "user-create-post.json",
+      "status": "PASS",
+      "expectedStatus": 201,
+      "actualStatus": 201,
       "reasonCode": null
     }
   ]
