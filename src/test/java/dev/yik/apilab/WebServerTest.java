@@ -147,6 +147,77 @@ class WebServerTest {
     }
 
     @Test
+    void submitTestNeverReenablesCreateCaseForStaleOrErrorResults() throws Exception {
+        String submitFunc = functionBody(pageBody(), "async function submitTest(event)");
+
+        // 请求期间改动后又改回：hash 重新相等，但 payload 已被作废，
+        // 必须同时检查 payload 为 null，否则会重新启用无响应的按钮。
+        assertTrue(submitFunc.contains("|| singleResultPayload === null"),
+                "stale detection must also treat an invalidated payload as stale");
+
+        int errorBranch = submitFunc.indexOf("if (data.status === \"ERROR\")");
+        int enable = submitFunc.indexOf("g(\"single-add-case\").disabled = false;");
+        assertTrue(errorBranch >= 0, "submitTest must special-case ERROR results");
+        assertTrue(enable >= 0, "successful results must enable the create-case entry");
+        assertTrue(errorBranch < enable,
+                "the ERROR branch must run before the button is enabled, so ERROR never exposes a usable entry");
+        assertEquals(1, countOccurrences(submitFunc, "g(\"single-add-case\").disabled = false;"),
+                "the create-case button must be enabled from exactly one guarded place");
+    }
+
+    @Test
+    void checkUrlSwitchRebindsAnchorAfterClearing() throws Exception {
+        String func = functionBody(pageBody(), "function checkUrlSwitch()");
+
+        // URL 未变化时必须直接返回，绝不能清空用户已填写的断言。
+        assertTrue(func.contains("if (url === lastSentUrl) return;"),
+                "unchanged URL must short-circuit before any clearing");
+
+        // 清空必须受“当前断言非空”约束，而不是无条件执行。
+        int clearGuard = func.indexOf("if (el.expectContains.value.trim())");
+        int clear = func.indexOf("el.expectContains.value = \"\";");
+        assertTrue(clearGuard >= 0 && clear > clearGuard,
+                "clearing must be guarded by a non-empty assertion check");
+
+        // 清空之后必须把锚点更新为新 URL，后续无变化的 blur 才不会重复清除。
+        int rebind = func.indexOf("lastSentUrl = url;", clear);
+        assertTrue(rebind > clear,
+                "anchor must be rebound to the new URL after clearing");
+        assertEquals(1, countOccurrences(func.substring(clear), "lastSentUrl = url;"),
+                "anchor rebinding must be a single statement after the clearing block");
+    }
+
+    @Test
+    void draftRoundTripPreservesAssertionAnchor() throws Exception {
+        String body = pageBody();
+        String capture = functionBody(body, "function captureSingleDraft()");
+        String restore = functionBody(body, "function restoreSingleDraft()");
+
+        assertTrue(capture.contains("lastSentUrl: lastSentUrl"),
+                "single draft must persist the assertion anchor");
+        assertTrue(restore.contains("lastSentUrl = singleDraft.lastSentUrl"),
+                "restoring the draft must restore its assertion anchor");
+    }
+
+    private static String functionBody(String page, String signature) {
+        int start = page.indexOf(signature);
+        assertTrue(start >= 0, signature + " must exist");
+        int end = page.indexOf("\n  function ", start + signature.length());
+        assertTrue(end > start, signature + " must close properly");
+        return page.substring(start, end);
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int idx = haystack.indexOf(needle);
+        while (idx >= 0) {
+            count++;
+            idx = haystack.indexOf(needle, idx + needle.length());
+        }
+        return count;
+    }
+
+    @Test
     void loadExamplePlacesInitialAnchorUrl() throws Exception {
         String body = pageBody();
 

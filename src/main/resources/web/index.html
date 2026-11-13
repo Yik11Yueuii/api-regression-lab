@@ -998,7 +998,7 @@
     <div class="empty-state" id="response-empty">发送请求后，这里会显示断言结果与实际响应内容。</div>
 
     <div class="soft-alert result-stale-banner" id="result-stale-banner" hidden>
-      当前表单在响应返回后已被修改，以上结果不再对应当前配置；请勿用它创建回归基线。重新发送请求可刷新。
+      本次请求执行期间表单被修改过，以上结果不再作为当前配置的有效基线，请勿用它创建回归用例；重新发送请求可刷新。
     </div>
 
     <div class="result" id="response-result" hidden>
@@ -1419,7 +1419,8 @@
     if (!payload) return;
 
     var requestHash = formSnapshot();
-    singleResultPayload = JSON.parse(JSON.stringify(payload));
+    var requestPayload = JSON.parse(JSON.stringify(payload));
+    singleResultPayload = requestPayload;
     singleResultFormHash = requestHash;
     lastSentUrl = normalizeUrl(payload.url);
     setAssertionAlert("");
@@ -1441,7 +1442,10 @@
 
       // 请求期间表单变动（改 URL、Method、Params/Headers、Body 或断言）→
       // 本次响应不再对应当前表单，标记为过期，不写入 meta、不启用创建按钮。
-      if (formSnapshot() !== requestHash) {
+      // 若期间表单被改动后又改回原样，快照虽重新相等，但中间已
+      // invalidateSingleResult()，payload 为 null，同样视为过期：
+      // 必须重新发送请求才能重建可信的结果快照。
+      if (formSnapshot() !== requestHash || singleResultPayload === null) {
         showResult(data);
         // 让用户看到真实响应，但立刻废除基线相关状态
         invalidateSingleResult();
@@ -1450,6 +1454,12 @@
       }
 
       showResult(data);
+      if (data.status === "ERROR") {
+        // 目标接口请求失败：没有可信的响应基线，不提供创建入口。
+        invalidateSingleResult();
+        setResultStale(false);
+        return;
+      }
       singleResultMeta = {
         expectedStatus: data.expectedStatus,
         actualStatus: data.actualStatus,
@@ -1525,14 +1535,22 @@
   function checkUrlSwitch() {
     if (caseEditorOpen) return; // 共享表单在批量编辑器里，不动
     var url = normalizeUrl(el.url.value);
-    if (!lastSentUrl) return;
-    if (url !== lastSentUrl && el.expectContains.value.trim()) {
-      // URL 变了，清掉上一个接口的 expectContains 避免污染；
-      // 不清 expectStatus——200 对大多数接口都合理，不影响状态码校验。
+    if (!lastSentUrl) { lastSentUrl = url; return; }
+    if (url === lastSentUrl) return; // URL 未变化，绝不清空用户已填写的断言
+
+    // 只有真正换了接口才清理上一个接口的 expectContains；
+    // 不清 expectStatus——200 对大多数接口都合理，不影响状态码校验。
+    var cleared = false;
+    if (el.expectContains.value.trim()) {
       el.expectContains.value = "";
+      cleared = true;
       setAssertionAlert("已切换到不同接口，上一个接口的响应包含断言已清空。当前仅验证 HTTP 状态码；请在响应预览中确认后再填写合适的包含文本。");
       activateTab("assertions", false);
     }
+    // 清理后把归属 URL 更新为新接口：用户随后为这个 URL 手填的断言属于它，
+    // 再次失焦（内容未变）时不会再被当成旧断言清除。
+    lastSentUrl = url;
+    if (cleared) clearSingleResultIfStale();
   }
 
   el.form.addEventListener("submit", submitTest);
@@ -2111,7 +2129,9 @@
       body: el.body.value,
       params: capturePairs(el.params),
       headers: capturePairs(el.headers),
-      tab: selected ? selected.dataset.tab : "params"
+      tab: selected ? selected.dataset.tab : "params",
+      // 断言归属锚点随草稿一起保存/恢复，避免往返批量编辑器后误清用户断言。
+      lastSentUrl: lastSentUrl
     };
   }
 
@@ -2134,6 +2154,7 @@
     el.body.value = singleDraft.body;
     restorePairs(el.params, "params", singleDraft.params);
     restorePairs(el.headers, "headers", singleDraft.headers);
+    lastSentUrl = singleDraft.lastSentUrl || null;
     clearErrors();
     syncMethod();
     updateCounts();
